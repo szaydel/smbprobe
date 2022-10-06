@@ -2,9 +2,7 @@
 import argparse
 import io
 import logging
-from operator import is_
 import os
-from re import L
 import subprocess
 import sys
 import tempfile
@@ -18,7 +16,6 @@ from prometheus_client import (
     Gauge,
     start_http_server,
     Counter,
-    Enum,
     Histogram,
     # write_to_textfile,
 )
