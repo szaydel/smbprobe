@@ -2,8 +2,11 @@
 import argparse
 import io
 import logging
+from operator import is_
 import os
+from re import L
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -11,10 +14,34 @@ from pathlib import Path
 from typing import List, Tuple
 from threading import Lock
 
+from prometheus_client import (
+    Gauge,
+    start_http_server,
+    Counter,
+    Enum,
+    Histogram,
+    # write_to_textfile,
+)
+
+SMB_STATUS = Gauge(
+    "smb_service_state", "Current state of SMB service based on results of the probe"
+)
+
+SMB_OP_LATENCY = Histogram(
+    "smb_operation_latency",
+    "Time it takes to complete a particular SMB operation",
+    labelnames=["operation"],
+)
+
+SMB_HIGH_OP_LATENCY = Counter(
+    "smb_latency_above_threshold_total",
+    "Count of times the probe detected high operation latency",
+    labelnames=["operation"],
+)
 
 LOGGER = logging.getLogger("smbmonitor")
 LOGGER.addHandler(logging.StreamHandler())
-LOGGER.setLevel(logging.DEBUG)
+LOGGER.setLevel(logging.ERROR) # Change level to INFO to get more details.
 
 PUT = object()
 GET = object()
@@ -294,6 +321,7 @@ def probe(
             if nwritten != size:
                 raise AssertionError("Did not write all bytes")
             local_file.flush()  # flush the stream to make sure file had content
+            # PUT FILES onto SMB share
             for i in range(nfiles):
                 start = time.time()
                 ok, msg = put_file(local_file.name, remote_file + f".{i}", si)
@@ -413,30 +441,86 @@ def run_probe_and_alert(si: ShareInfo, remote_file: str):
         remote_file (str): Path to the file on the SMB share.
     """
     ok, latencies = probe(remote_file, si)
+    healthy = ok
 
-    if not ok:
-        # Raise a notification
-        pass
+    for o in latencies.read_lat:
+        SMB_OP_LATENCY.labels("read").observe(o)
+
+    for o in latencies.write_lat:
+        SMB_OP_LATENCY.labels("write").observe(o)
+
+    for o in latencies.lsdir_lat:
+        SMB_OP_LATENCY.labels("ls_dir").observe(o)
+
+    for o in latencies.unlink_lat:
+        SMB_OP_LATENCY.labels("unlink").observe(o)
 
     if latencies.read_lat_above_threshold(1):
+        healthy = False
         # Raise a notification
+        SMB_HIGH_OP_LATENCY.labels("read").inc()
         LOGGER.error("median read latency is above threshold")
 
     if latencies.write_lat_above_threshold(1):
+        healthy = False
         # Raise a notification
+        SMB_HIGH_OP_LATENCY.labels("write").inc()
         LOGGER.error("median write latency is above threshold")
 
-    if latencies.unlink_lat_above_threshold(1):
+    if latencies.lsdir_lat_above_threshold(1):
+        healthy = False
         # Raise a notification
+        SMB_HIGH_OP_LATENCY.labels("ls_dir").inc()
+        LOGGER.error("median list directory latency is above threshold")
+
+    if latencies.unlink_lat_above_threshold(1):
+        healthy = False
+        # Raise a notification
+        SMB_HIGH_OP_LATENCY.labels("unlink").inc()
         LOGGER.error("median unlink latency is above threshold")
 
-    if latencies.lsdir_lat_above_threshold(1):
+    if not healthy:
         # Raise a notification
-        LOGGER.error("median list directory latency is above threshold")
+        SMB_STATUS.set(1)
+    else:
+        SMB_STATUS.set(0)
+
+    # write_to_textfile("raid.prom", #include registry parameter#)
+
+
+def parse_config_file(config: str) -> Tuple[bool, List[str]]:
+    """Parses configuration from file and produces a list of amounts to command line arguments.
+
+    Args:
+        config (str): Path to the configuration file.
+
+    Returns:
+        Tuple[bool, List[str]]: True if OK, False otherwise and argparse configuration parameters suitable for ingestion in parse_args.
+    """
+    conf_lines = []
+    try:
+        with open(config, "rb") as fp:
+            for line in fp.readlines():
+                tokens = line.decode("utf-8").strip().split()
+                conf_lines += tokens
+    except FileNotFoundError:
+        return False, []
+    return True, conf_lines
 
 
 if __name__ == "__main__":
-    args = parser.parse_args()
+    if "SMB_MONITOR_PROBE_CONFIGFILE" in os.environ:
+        ok, from_config = parse_config_file(os.environ["SMB_MONITOR_PROBE_CONFIGFILE"])
+        if ok:
+            args = parser.parse_args(from_config)
+        else:
+            print(
+                f"Could not read arguments from {os.environ['SMB_MONITOR_PROBE_CONFIGFILE']}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    else: # Configuration file environment variable is not set
+        args = parser.parse_args()
     address = args.address
     domain = args.domain
     share = args.share
@@ -456,6 +540,14 @@ if __name__ == "__main__":
 
     si = ShareInfo(address, share, domain, username, password)
 
+    # Start up the server to expose the metrics.
+    start_http_server(8000)
+
+    # Initialize the high latency counter.
+    SMB_HIGH_OP_LATENCY.labels("read").inc(0)
+    SMB_HIGH_OP_LATENCY.labels("write").inc(0)
+    SMB_HIGH_OP_LATENCY.labels("ls_dir").inc(0)
+    SMB_HIGH_OP_LATENCY.labels("unlink").inc(0)
     while True:
         run_probe_and_alert(si, remote_file)
         time.sleep(interval)
