@@ -36,9 +36,15 @@ SMB_HIGH_OP_LATENCY = Counter(
     labelnames=["operation"],
 )
 
+SMB_OP_FAILED = Counter(
+    "smb_operation_failed_total",
+    "Number of times a particular probe operation did not succeed",
+    labelnames=["operation"],
+)
+
 LOGGER = logging.getLogger("smbmonitor")
 LOGGER.addHandler(logging.StreamHandler())
-LOGGER.setLevel(logging.ERROR) # Change level to INFO to get more details.
+LOGGER.setLevel(logging.ERROR)  # Change level to INFO to get more details.
 
 PUT = object()
 GET = object()
@@ -54,6 +60,14 @@ class ShareInfo:
     domain: str
     user: str
     passwd: str
+
+
+@dataclass
+class FailureCounts:
+    read: int
+    write: int
+    unlink: int
+    ls_dir: int
 
 
 @dataclass
@@ -287,7 +301,7 @@ def put_file(src_file, dst_file, si: ShareInfo) -> bool:
 
 def probe(
     remote_file, si: ShareInfo, nfiles=20, size=4 * IOSIZE, read_back=True, unlink=True
-) -> Tuple[bool, Latencies]:
+) -> Tuple[bool, Latencies, FailureCounts]:
     """Probes the SMB share by performing a number of basic file operations and collecting basic latency stats from these operations.
 
     Args:
@@ -302,7 +316,7 @@ def probe(
         AssertionError: Raised if local file is not written out properly.
 
     Returns:
-        Tuple[bool, str]: True and no message on success, False and message on failure.
+        Tuple[bool, Latencies, FailureCounts]: First parameter includes overall success or failure of probe, second includes latencies of performed operations and third includes counts of failed operations.
     """
     remote_path = Path(remote_file)
     remote_dir = remote_path.parent
@@ -311,6 +325,7 @@ def probe(
     write_latencies = []
     unlink_latencies = []
     lsdir_latencies = []
+    fails = FailureCounts(0, 0, 0, 0)
 
     with tempfile.NamedTemporaryFile() as local_file:  # Will be deleted on close
         with RandomDataFile(size=size) as buffer:
@@ -324,6 +339,7 @@ def probe(
                 ok, msg = put_file(local_file.name, remote_file + f".{i}", si)
                 delta = time.time() - start
                 if not ok:
+                    fails.write += 1
                     LOGGER.error(f"failed to put test file on the share: {msg}")
                     succeeded = False
                 else:
@@ -337,6 +353,7 @@ def probe(
         ok, msg = list_directory(SHARE_ROOT, si)
         delta = time.time() - start
         if not ok:
+            fails.ls_dir += 1
             LOGGER.error(f"failed to list contents of the share root: {msg}")
             succeeded = False
         else:
@@ -346,6 +363,7 @@ def probe(
         ok, msg = list_directory(remote_dir, si)
         delta = time.time() - start
         if not ok:
+            fails.ls_dir += 1
             LOGGER.error(
                 f"failed to list contents of the remote directory {remote_dir}: {msg}"
             )
@@ -359,6 +377,7 @@ def probe(
             ok, msg = get_file(remote_file + f".{i}", f"testfile.{i}", si)
             delta = time.time() - start
             if not ok:
+                fails.read += 1
                 LOGGER.error(f"failed to read test file from the share: {msg}")
                 succeeded = False
             else:
@@ -373,6 +392,7 @@ def probe(
             ok, msg = remove_file(remote_file + f".{i}", si)
             delta = time.time() - start
             if not ok:
+                fails.unlink += 1
                 LOGGER.error(f"failed to remote test file from the share: {msg}")
                 succeeded = False
             else:
@@ -381,8 +401,10 @@ def probe(
                 )
             unlink_latencies.append(delta)
 
-    return succeeded, Latencies(
-        read_latencies, write_latencies, unlink_latencies, lsdir_latencies
+    return (
+        succeeded,
+        Latencies(read_latencies, write_latencies, unlink_latencies, lsdir_latencies),
+        fails,
     )
 
 
@@ -437,7 +459,7 @@ def run_probe_and_alert(si: ShareInfo, remote_file: str):
         si (ShareInfo): Share description class.
         remote_file (str): Path to the file on the SMB share.
     """
-    ok, latencies = probe(remote_file, si)
+    ok, latencies, fails = probe(remote_file, si)
     healthy = ok
 
     for o in latencies.read_lat:
@@ -482,6 +504,20 @@ def run_probe_and_alert(si: ShareInfo, remote_file: str):
     else:
         SMB_STATUS.set(0)
 
+    # Check if any commands had failures and if so, increment the failure
+    # counters.
+    if fails.read > 0:
+        SMB_OP_FAILED.labels("read").inc(fails.read)
+
+    if fails.write > 0:
+        SMB_OP_FAILED.labels("write").inc(fails.write)
+
+    if fails.ls_dir > 0:
+        SMB_OP_FAILED.labels("ls_dir").inc(fails.ls_dir)
+
+    if fails.unlink > 0:
+        SMB_OP_FAILED.labels("unlink").inc(fails.unlink)
+
     # write_to_textfile("raid.prom", #include registry parameter#)
 
 
@@ -516,7 +552,7 @@ if __name__ == "__main__":
                 file=sys.stderr,
             )
             sys.exit(1)
-    else: # Configuration file environment variable is not set
+    else:  # Configuration file environment variable is not set
         args = parser.parse_args()
     address = args.address
     domain = args.domain
@@ -540,11 +576,16 @@ if __name__ == "__main__":
     # Start up the server to expose the metrics.
     start_http_server(8000)
 
-    # Initialize the high latency counter.
+    # Initialize the high latency counter and the operation failed counter.
     SMB_HIGH_OP_LATENCY.labels("read").inc(0)
     SMB_HIGH_OP_LATENCY.labels("write").inc(0)
     SMB_HIGH_OP_LATENCY.labels("ls_dir").inc(0)
     SMB_HIGH_OP_LATENCY.labels("unlink").inc(0)
+    SMB_OP_FAILED.labels("read").inc(0)
+    SMB_OP_FAILED.labels("write").inc(0)
+    SMB_OP_FAILED.labels("ls_dir").inc(0)
+    SMB_OP_FAILED.labels("unlink").inc(0)
+
     while True:
         run_probe_and_alert(si, remote_file)
         time.sleep(interval)
