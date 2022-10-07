@@ -451,8 +451,47 @@ parser.add_argument(
     help="Probe execution interval in seconds",
 )
 
+parser.add_argument(
+    "--read-latency-threshold",
+    dest="read_threshold",
+    type=float,
+    default=1.0,
+    help="Threshold for acceptable read latency in seconds",
+)
 
-def run_probe_and_alert(si: ShareInfo, remote_file: str):
+parser.add_argument(
+    "--write-latency-threshold",
+    dest="write_threshold",
+    type=float,
+    default=1.0,
+    help="Threshold for acceptable write latency in seconds",
+)
+
+parser.add_argument(
+    "--ls_dir-latency-threshold",
+    dest="ls_dir_threshold",
+    type=float,
+    default=1.0,
+    help="Threshold for acceptable directory listing latency in seconds",
+)
+
+parser.add_argument(
+    "--unlink-latency-threshold",
+    dest="unlink_threshold",
+    type=float,
+    default=1.0,
+    help="Threshold for acceptable unlink latency in seconds",
+)
+
+
+def run_probe_and_alert(
+    si: ShareInfo,
+    remote_file: str,
+    read_thresh=1.0,
+    write_thresh=1.0,
+    ls_dir_thresh=1.0,
+    unlink_thresh=1.0,
+):
     """Runs the probe and generates an alert if the probe fails or latencies are above threshold values.
 
     Args:
@@ -474,25 +513,25 @@ def run_probe_and_alert(si: ShareInfo, remote_file: str):
     for o in latencies.unlink_lat:
         SMB_OP_LATENCY.labels("unlink").observe(o)
 
-    if latencies.read_lat_above_threshold(1):
+    if latencies.read_lat_above_threshold(read_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels("read").inc()
         LOGGER.error("median read latency is above threshold")
 
-    if latencies.write_lat_above_threshold(1):
+    if latencies.write_lat_above_threshold(write_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels("write").inc()
         LOGGER.error("median write latency is above threshold")
 
-    if latencies.lsdir_lat_above_threshold(1):
+    if latencies.lsdir_lat_above_threshold(ls_dir_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels("ls_dir").inc()
         LOGGER.error("median list directory latency is above threshold")
 
-    if latencies.unlink_lat_above_threshold(1):
+    if latencies.unlink_lat_above_threshold(unlink_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels("unlink").inc()
@@ -534,6 +573,8 @@ def parse_config_file(config: str) -> Tuple[bool, List[str]]:
     try:
         with open(config, "rb") as fp:
             for line in fp.readlines():
+                if line.startswith(b"#"): # Skip comment lines
+                    continue
                 tokens = line.decode("utf-8").strip().split()
                 conf_lines += tokens
     except FileNotFoundError:
@@ -541,10 +582,27 @@ def parse_config_file(config: str) -> Tuple[bool, List[str]]:
     return True, conf_lines
 
 
+def display_parsed_config(conf_lines: List[str]):
+    """Prints out the configuration with which we are running.
+
+    Args:
+        conf_lines (List[str]): Parsed command line args as a list of arguments and values.
+    """
+    i = 0
+    while i < len(conf_lines):
+        if conf_lines[i] == "--password":
+            print(f"{conf_lines[i]:<20}\t=> ***SANITIZED***", file=sys.stderr)
+        else:
+            print(f"{conf_lines[i]:<20}\t=> {conf_lines[i+1]}", file=sys.stderr)
+        i += 2
+
+
 if __name__ == "__main__":
     if "SMB_MONITOR_PROBE_CONFIGFILE" in os.environ:
         ok, from_config = parse_config_file(os.environ["SMB_MONITOR_PROBE_CONFIGFILE"])
         if ok:
+            print("Running SMB probe with the following parameters:", file=sys.stderr)
+            display_parsed_config(from_config)
             args = parser.parse_args(from_config)
         else:
             print(
@@ -561,6 +619,12 @@ if __name__ == "__main__":
     password = args.password
     remote_file = args.remote_file
     interval = args.interval
+
+    # Thresholds from args
+    read_threshold = args.read_threshold
+    write_threshold = args.write_threshold
+    ls_dir_threshold = args.ls_dir_threshold
+    unlink_threshold = args.unlink_threshold
 
     # Get the password out of the environment instead of the `--password`
     # parameter to the program. This should be done typically in any production
@@ -587,5 +651,12 @@ if __name__ == "__main__":
     SMB_OP_FAILED.labels("unlink").inc(0)
 
     while True:
-        run_probe_and_alert(si, remote_file)
+        run_probe_and_alert(
+            si,
+            remote_file,
+            read_threshold,
+            write_threshold,
+            ls_dir_threshold,
+            unlink_threshold,
+        )
         time.sleep(interval)
