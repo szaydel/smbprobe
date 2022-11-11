@@ -42,9 +42,15 @@ SMB_OP_FAILED = Counter(
     labelnames=["operation"],
 )
 
-LOGGER = logging.getLogger("smbmonitor")
-LOGGER.addHandler(logging.StreamHandler())
-LOGGER.setLevel(logging.ERROR)  # Change level to INFO to get more details.
+DEFAULT_LOG_LEVEL = logging.DEBUG  # Change level to adjust output verbosity
+
+logging.basicConfig(
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    level=DEFAULT_LOG_LEVEL,
+    datefmt="%Y-%m-%dT%H:%M:%S%z",
+)
+
+LOGGER = logging.getLogger("smb-probe")
 
 PUT = object()
 GET = object()
@@ -393,7 +399,7 @@ def probe(
             delta = time.time() - start
             if not ok:
                 fails.unlink += 1
-                LOGGER.error(f"failed to remote test file from the share: {msg}")
+                LOGGER.error(f"failed to remove test file from the share: {msg}")
                 succeeded = False
             else:
                 LOGGER.info(
@@ -573,7 +579,7 @@ def parse_config_file(config: str) -> Tuple[bool, List[str]]:
     try:
         with open(config, "rb") as fp:
             for line in fp.readlines():
-                if line.startswith(b"#"): # Skip comment lines
+                if line.startswith(b"#"):  # Skip comment lines
                     continue
                 tokens = line.decode("utf-8").strip().split()
                 conf_lines += tokens
