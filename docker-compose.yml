@@ -39,3 +39,11 @@ services:
       SMB_MONITOR_PROBE_PASSWD: Racktop1
       SMB_MONITOR_PROBE_CONFIGFILE: /monitoring/probe.conf
     restart: always
+    # logging:
+    #   driver: syslog
+    #   options:
+    #     syslog-address: "tcp://localhost:5514"
+    #     syslog-facility: 1
+    #     tag: smb-probe
+    #     # Possible formats are rfc3164, rfc5424, rfc5424micro
+    #     syslog-format: rfc3164
