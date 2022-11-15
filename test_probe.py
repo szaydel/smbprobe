@@ -1,17 +1,25 @@
 import unittest
-import mock
 
 from typing import List
 from probe import GET, PUT, ShareInfo, file_put_get_impl
 from unittest.mock import Mock, call
 
 
+from dataclasses import dataclass
+
+@dataclass
+class EvaluatedCommandResult:
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+    input_cmd: str = None
+
 class T(unittest.TestCase):
     def test_file_put_get_impl_successful(self):
         m = Mock()
         m.stdout = b"mock standard out"
         m.stderr = b"mock standard error"
-        m.return_value = mock.EvaluatedCommandResult(
+        m.return_value = EvaluatedCommandResult(
             returncode=0,
             stdout=b"",
             stderr=b"this is mock output sent to stderr",
