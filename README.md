@@ -5,19 +5,21 @@ The probe is a standalone python program, which has a few dependencies. The prog
 
 The contents of `docker-compose.yml` will work seamlessly if we build the container as follows:
 ```
-$ docker build -t rts/probe:test .
+$ docker build -t rts/probe:latest -t rts/probe:$(git rev-parse --short HEAD).
 ```
 
 ## Running the probe stack
 The _stack_ is actually a combination of the probe and Prometheus server. We may add other things in the future to support additional functionality, such as webhooks.
 The following is an example of how to run the actual probe once it is built from the `Dockerfile`. While this is good for rapid testing, a `docker-compose.yml` file is provided to make it easier to run this environment as a service. Prometheus container is started along with the SMB probe container and the SMB probe container is automatically scrabed by the Prometheus server.
+
 ```
 docker run -it --rm -p 8000:8000 \
     -v `pwd`/probe.conf:/monitoring/probe.conf \
     -e SMB_MONITOR_PROBE_PASSWD=abcxyz \
     -e SMB_MONITOR_PROBE_CONFIGFILE=/monitoring/probe.conf \
-    rts/probe:test
+    rts/probe:latest
 ```
+
 The config file referenced by the `SMB_MONITOR_PROBE_CONFIGFILE` environment variable needs to have contents that look like the following:
 ```
 --address 1.2.3.4
@@ -27,7 +29,9 @@ The config file referenced by the `SMB_MONITOR_PROBE_CONFIGFILE` environment var
 --remote-file-prefix probedir/testfile
 --interval 5
 ```
-Under the `monitoring` directory locate `probe.conf` and edit it to include correct parameters necessary to connect and interoperate with the share. Once done, startup the entire stack with `docker compose up`. To stop the stack it is possible to issue `docker compose stop` and then restart with `docker compose start`.
+Under the `monitoring` directory locate `probe.conf` and edit it to include correct parameters necessary to connect and interoperate with the share. It is possible to include more than one instance of `--address` in order to probe the same machine via multiple IPs, DNS name, etc. Simply, include more than one instance of `--address <some address>` or include more than one `--address` entry in the config file.
+
+Once done, startup the entire stack with `docker compose up`. To stop the stack it is possible to issue `docker compose stop` and then restart with `docker compose start`.
 
 ## Logging from the SMB probe container
 To make log-based metrics easier we include an example syslog configuration in the `docker-compose.yml` file. Uncommenting and configuring the `logging` section in the `probe` service block is going to enable automatic log forwarding via syslog to the configured destination. It is easy to test this locally with `netcat`, unless TLS configuration is enabled. Further details are available in Docker documentation about the [Docker Syslog logging driver](https://docs.docker.com/config/containers/logging/syslog).
