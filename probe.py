@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import List, Tuple
 from threading import Lock, Thread
 
+from logfmter import Logfmter
+
 from prometheus_client import (
     Gauge,
     start_http_server,
@@ -43,12 +45,6 @@ SMB_OP_FAILED = Counter(
 )
 
 DEFAULT_LOG_LEVEL = logging.DEBUG  # Change level to adjust output verbosity
-
-logging.basicConfig(
-    format="%(asctime)s %(levelname)-8s %(message)s",
-    level=DEFAULT_LOG_LEVEL,
-    datefmt="%Y-%m-%dT%H:%M:%S%z",
-)
 
 LOGGER = logging.getLogger("smb-probe")
 
@@ -515,6 +511,15 @@ parser.add_argument(
     default=300,
     help="Probe execution interval in seconds",
 )
+parser.add_argument(
+    "--log-timestamp",
+    action=argparse.BooleanOptionalAction,
+    dest="log_timestamp",
+    type=bool,
+    default=True,
+    required=False,
+    help="Connection will be made to this share on the SMB server",
+)
 
 parser.add_argument(
     "--read-latency-threshold",
@@ -657,9 +662,16 @@ def display_parsed_config(conf_lines: List[str]):
     while i < len(conf_lines):
         if conf_lines[i] == "--password":
             print(f"{conf_lines[i]:<20}\t=> ***SANITIZED***", file=sys.stderr)
+            i += 2
         else:
-            print(f"{conf_lines[i]:<20}\t=> {conf_lines[i+1]}", file=sys.stderr)
-        i += 2
+            # We are either at the end, or next elem is actually an argument,
+            # i.e. --foo as opposed to a paramater to this argument.
+            if i + 1 == len(conf_lines) or conf_lines[i + 1][0:2] == "--":
+                print(f"{conf_lines[i]:<20}", file=sys.stderr)
+                i += 1
+            else:
+                print(f"{conf_lines[i]:<20}\t=> {conf_lines[i+1]}", file=sys.stderr)
+                i += 2
 
 
 def repeat_forever(*func_with_args, **kwargs):
@@ -689,7 +701,7 @@ if __name__ == "__main__":
             sys.exit(1)
     else:  # Configuration file environment variable is not set
         args = parser.parse_args()
-        # print(args, file=sys.stderr)
+    # print(args, file=sys.stderr)
 
     addresses: List[str] = args.addresses
     domain = args.domain
@@ -698,12 +710,34 @@ if __name__ == "__main__":
     password = args.password
     remote_file = args.remote_file
     interval = args.interval
+    log_timestamp = args.log_timestamp
 
     # Thresholds from args
     read_threshold = args.read_threshold
     write_threshold = args.write_threshold
     ls_dir_threshold = args.ls_dir_threshold
     unlink_threshold = args.unlink_threshold
+
+    # Setup logging configuration
+    if log_timestamp:
+        formatter = Logfmter(
+            keys=["level", "ts"],
+            mapping={"level": "levelname", "ts": "asctime"},
+            datefmt="%Y-%m-%dT%H:%M:%S%z",
+        )
+    else:
+        formatter = Logfmter(
+            keys=["level"],
+            mapping={"level": "levelname"},
+        )
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    logging.basicConfig(
+        handlers=[handler],
+        format="%(asctime)s %(levelname)-8s %(message)s",
+        level=DEFAULT_LOG_LEVEL,
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+    )
 
     # Get the password out of the environment instead of the `--password`
     # parameter to the program. This should be done typically in any production
