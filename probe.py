@@ -27,14 +27,14 @@ SMB_STATUS = Gauge(
 )
 
 SMB_OP_LATENCY = Histogram(
-    "smb_operation_latency",
-    "Time it takes to complete a particular SMB operation",
+    "smb_operation_latency_seconds",
+    "Time it takes to complete a given SMB operation, such as read, write, lsdir, unlink",
     labelnames=["address", "operation"],
 )
 
 SMB_HIGH_OP_LATENCY = Counter(
     "smb_latency_above_threshold_total",
-    "Count of times the probe detected high operation latency",
+    "Count of times the probe detected high operation latency during a read, write, lsdir, unlink",
     labelnames=["address", "operation"],
 )
 
@@ -567,6 +567,10 @@ def run_probe_and_alert(
     Args:
         si (ShareInfo): Share description class.
         remote_file (str): Path to the file on the SMB share.
+        read_thresh (float, optional): Latency threshold for read(s). Defaults to 1.0.
+        write_thresh (float, optional): Latency threshold for write(s). Defaults to 1.0.
+        ls_dir_thresh (float, optional): Latency threshold for lsdir(s). Defaults to 1.0.
+        unlink_thresh (float, optional): Latency threshold for unlink. Defaults to 1.0.
     """
     ok, latencies, fails = probe(remote_file, si)
     healthy = ok
