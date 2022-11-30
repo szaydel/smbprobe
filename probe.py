@@ -768,15 +768,16 @@ if __name__ == "__main__":
     start_http_server(8000)
 
     threads: List[Thread] = list()
-    for si in si_list:
+    for idx, si in enumerate(si_list):
         print(si)
+        fname_indexed = f"{remote_file}.{idx}"
         threads.append(
             Thread(
                 target=repeat_forever,
                 args=(
                     run_probe_and_alert,
                     si,
-                    remote_file,
+                    fname_indexed,  # Each thread gets its own filename prefix
                     read_threshold,
                     write_threshold,
                     ls_dir_threshold,
