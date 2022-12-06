@@ -1,5 +1,5 @@
-# SMB monitoring probe README
-
+[![CodeQL](https://github.com/szaydel/smbprobe/actions/workflows/codeql.yml/badge.svg)](https://github.com/szaydel/smbprobe/actions/workflows/codeql.yml)
+# SMB monitoring probe
 ## Building the container
 The probe is a standalone python program, which has a few dependencies. The program itself is quite simple and for the bulk of the work it relies on the SAMBA package, and specifically the `smbclient` utility. Delivering the probe packaged as a Docker container makes it much easier to provide all the necessary plumbing with the container, eliminating any version incompatibility or missing dependencies on the host type of concerns. Requirements to run the container are minimal, eliminating need for any SMB utilities on the host. The probe depends on a specific version of the `smbclient` utility, which the image built from the provided `Dockerfile` will contain. Use the `Dockerfile` at the root of this repository and build an image with `docker build -t rts/probe:<some-version> .`. This will generate the image that we will need to use with the compose functionality of Docker. See `docker-compose.yml` for details. This file references the name of the image that will be started along with Prometheus.
 
