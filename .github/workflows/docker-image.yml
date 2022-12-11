@@ -15,4 +15,4 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Build the Docker image of the SMB probe
-      run: docker build -t rts/probe:latest -t rts/probe:$(git rev-parse --short HEAD)
+      run: docker build -t rts/probe:latest -t rts/probe:$(git rev-parse --short HEAD) .
