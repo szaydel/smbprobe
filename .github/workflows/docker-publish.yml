@@ -72,6 +72,7 @@ jobs:
             type=sha,prefix=,suffix=,format=short,event=branch
             type=sha,prefix=,suffix=,format=short,event=tag
             type=sha,prefix=,suffix=,format=short,event=pr
+            type=raw,value=latest,enable={{is_default_branch}}
 
       # Build and push Docker image with Buildx (don't push on PR)
       # https://github.com/docker/build-push-action
