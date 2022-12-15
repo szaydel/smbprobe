@@ -1,0 +1,12 @@
+on:
+  pull_request:
+jobs:
+  test_job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: a
+        run: echo ${{ github }}
+      - name: b
+        run: env
+      - name: c
+        run: echo ${{ env }}
