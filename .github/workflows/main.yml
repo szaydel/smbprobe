@@ -5,7 +5,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: a
-        run: echo "{{ github }}"
+        run: echo "${{ github.action }}"
       - name: b
         run: env
       - name: c
