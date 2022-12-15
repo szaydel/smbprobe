@@ -4,5 +4,9 @@ jobs:
   test_job:
     runs-on: ubuntu-latest
     steps:
-      - name: Collaboration
-        run: echo '${{ github }}'
+      - name: a
+        run: echo "{{ github }}"
+      - name: b
+        run: env
+      - name: c
+        run: set
