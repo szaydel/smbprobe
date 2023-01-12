@@ -12,12 +12,13 @@ $ docker build -t rts/probe:latest -t rts/probe:$(git rev-parse --short HEAD).
 The _stack_ is actually a combination of the probe and Prometheus server. We may add other things in the future to support additional functionality, such as webhooks.
 The following is an example of how to run the actual probe once it is built from the `Dockerfile`. While this is good for rapid testing, a `docker-compose.yml` file is provided to make it easier to run this environment as a service. Prometheus container is started along with the SMB probe container and the SMB probe container is automatically scrabed by the Prometheus server.
 
+The container is published via the GHCR and rebuilt when changes are made to master. Download the latest container image with `docker pull ghcr.io/szaydel/smbprobe:latest`.
 ```
 docker run -it --rm -p 8000:8000 \
     -v `pwd`/probe.conf:/monitoring/probe.conf \
     -e SMB_MONITOR_PROBE_PASSWD=abcxyz \
     -e SMB_MONITOR_PROBE_CONFIGFILE=/monitoring/probe.conf \
-    rts/probe:latest
+    ghcr.io/szaydel/smbprobe:latest
 ```
 
 The config file referenced by the `SMB_MONITOR_PROBE_CONFIGFILE` environment variable needs to have contents that look like the following:
