@@ -27,7 +27,7 @@ The config file referenced by the `SMB_MONITOR_PROBE_CONFIGFILE` environment var
 --domain example.com
 --share example_share
 --username testuser
---remote-file-prefix probedir/testfile
+--remote-basedir probedir/
 --interval 5
 ```
 Under the `monitoring` directory locate `probe.conf` and edit it to include correct parameters necessary to connect and interoperate with the share. It is possible to include more than one instance of `--address` in order to probe the same machine via multiple IPs, DNS name, etc. Simply, include more than one instance of `--address <some address>` or include more than one `--address` entry in the config file.

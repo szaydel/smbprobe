@@ -1,17 +1,21 @@
 import unittest
 from io import StringIO
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, call
 from dataclasses import dataclass
+
+import pexpect.replwrap
+
 from probe import (
     GET,
     PUT,
-    ShareInfo,
     display_parsed_config,
-    eval_error,
     file_put_get_impl,
+    get_file,
+    put_file,
     list_directory,
     parse_config_file,
     remove_file,
+    timeit,
 )
 
 
@@ -30,168 +34,147 @@ def display_parsed_config_redirect_stderr(input, mock_stderr):
 
 
 class T(unittest.TestCase):
-    def test_file_put_get_impl_is_successful(self):
-        m = Mock()
-        m.stdout = b"mock standard out"
-        m.stderr = b"mock standard error"
-        m.return_value = EvaluatedCommandResult(
-            returncode=0,
-            stdout=b"",
-            stderr=b"this is mock output sent to stderr",
+    def test_timeit_decorator(self):
+        @timeit
+        def test_nop_function():
+            return None
+
+        _, delta = test_nop_function()
+        self.assertTrue(delta > 0 and delta < 0.1)
+
+    def test_list_remove_repl_cmds_evaluate_correctly(self):
+        def mock_eval_line_func(repl, cmd_line):
+            repl.run_command(cmd_line)
+            return True, None
+
+        def mock_exec_func(repl, repl_cmd, eval_line_func=mock_eval_line_func):
+            return eval_line_func(repl, repl_cmd)
+
+        remote_file_or_dir = "alpha"
+        mock_repl = Mock(spec=pexpect.replwrap.REPLWrapper)
+
+        commands = {
+            "ls": list_directory,
+            "rm": remove_file,
+        }
+
+        for cmd, cmd_func in commands.items():
+            mock_repl.reset_mock()
+            mock_repl.run_command.return_value = "this is ok"
+            _, delta = cmd_func(
+                remote_file_or_dir,
+                repl=mock_repl,
+                eval_line_func=mock_exec_func,
+            )
+
+        self.assertLess(delta, 1)  # This should be nearly instant
+        self.assertTrue(mock_repl.run_command.called)
+        self.assertTrue(
+            mock_repl.run_command.call_args == call(f"{cmd} {remote_file_or_dir}")
         )
 
-        addr = "1.2.3.4"
-        share = "testshare"
-        domain = "mock.local"
-        user = "mockuser"
-        passwd = "mockpass"
+    def test_file_put_get_impl(self):
+        cmds = {
+            GET: "get",
+            PUT: "put",
+        }
 
-        file_from = "alpha"
-        file_to = "beta"
+        local_file = remote_file = "alpha"
+        mock_repl = Mock(spec=pexpect.replwrap.REPLWrapper)
+        mock_repl.run_command.return_value = "this is ok"
 
-        actual = file_put_get_impl(
-            GET,
-            file_from,
-            file_to,
-            ShareInfo(
-                addr="1.2.3.4",
-                share="testshare",
-                domain="mock.local",
-                user=user,
-                passwd=passwd,
-            ),
-            exec_func=m,
+        for direction, cmd in cmds.items():
+            resp = file_put_get_impl(direction, local_file, remote_file, repl=mock_repl)
+            self.assertEqual(resp, (True, None))
+            self.assertTrue(mock_repl.run_command.called)
+            self.assertTrue(
+                mock_repl.run_command.call_args
+                == call(f"{cmd} {local_file} {remote_file}")
+            )
+
+    def test_file_put_get_impl_gets_an_error(self):
+        cmds = {
+            GET: "get",
+            PUT: "put",
+        }
+
+        local_file = remote_file = "alpha"
+        mock_repl = Mock(spec=pexpect.replwrap.REPLWrapper)
+        mock_repl.run_command.return_value = (
+            "XX NT_STATUS_CONNECTION_DISCONNECTED this is a mock failure XX"
         )
 
-        expected_args = [
-            "smbclient",
-            "-E",
-            f"//{addr}/{share}",
-            "-W",
-            f"{domain}",
-            "-U",
-            f"{user}%{passwd}",
-        ]
-        m.assert_called_once_with(
-            expected_args,
-            input=bytes(f"get {file_from} {file_to}", encoding="utf8"),
-            capture_output=True,
+        for direction, cmd in cmds.items():
+            resp = file_put_get_impl(direction, local_file, remote_file, repl=mock_repl)
+            self.assertEqual(
+                resp,
+                (
+                    False,
+                    f"smbclient failed evaluating: '{cmd} {local_file} {remote_file}';  error: NT_STATUS_CONNECTION_DISCONNECTED this is a mock failure",
+                ),
+            )
+            self.assertTrue(mock_repl.run_command.called)
+            self.assertTrue(
+                mock_repl.run_command.call_args
+                == call(f"{cmd} {local_file} {remote_file}")
+            )
+
+    def test_put_get_repl_cmds_evaluate_correctly(self):
+        def mock_eval_line_func(repl, cmd_line):
+            repl.run_command(cmd_line)
+            return True, None
+
+        def mock_exec_func(
+            direction, src_file, dst_file, repl, eval_line_func=mock_eval_line_func
+        ):
+            cmds = {
+                PUT: "put",
+                GET: "get",
+            }
+            repl_cmd = f"{cmds[direction]} {src_file} {dst_file}"
+            return eval_line_func(repl, repl_cmd)
+
+        local_file = remote_file = "alpha"
+        mock_repl = Mock(spec=pexpect.replwrap.REPLWrapper)
+
+        commands = {
+            "get": get_file,
+            "put": put_file,
+        }
+
+        for cmd, cmd_func in commands.items():
+            mock_repl.reset_mock()
+            mock_repl.run_command.return_value = "this is ok"
+            _, delta = cmd_func(
+                local_file,
+                remote_file,
+                repl=mock_repl,
+                file_put_get_func=mock_exec_func,
+            )
+
+        self.assertLess(delta, 1)  # This should be nearly instant
+        self.assertTrue(mock_repl.run_command.called)
+        self.assertTrue(
+            mock_repl.run_command.call_args == call(f"{cmd} {local_file} {remote_file}")
         )
-        self.assertEqual((True, None), actual)
-
-        m.reset_mock()
-
-        actual = file_put_get_impl(
-            PUT,
-            file_from,
-            file_to,
-            ShareInfo(
-                addr="1.2.3.4",
-                share="testshare",
-                domain="mock.local",
-                user=user,
-                passwd=passwd,
-            ),
-            exec_func=m,
-        )
-        m.assert_called_once_with(
-            expected_args,
-            input=bytes(f"put {file_from} {file_to}", encoding="utf8"),
-            capture_output=True,
-        )
-        self.assertEqual((True, None), actual)
-
-    def test_list_directory_is_successful(self):
-        m = Mock()
-        m.stdout = b"mock standard out"
-        m.stderr = b"mock standard error"
-        m.return_value = EvaluatedCommandResult(
-            returncode=0,
-            stdout=b"",
-            stderr=b"this is mock output sent to stderr",
-        )
-
-        addr = "1.2.3.4"
-        share = "testshare"
-        domain = "mock.local"
-        user = "mockuser"
-        passwd = "mockpass"
-
-        remote_dir = "alpha"
-
-        actual = list_directory(
-            remote_dir,
-            ShareInfo(
-                addr="1.2.3.4",
-                share="testshare",
-                domain="mock.local",
-                user=user,
-                passwd=passwd,
-            ),
-            exec_func=m,
-        )
-
-        expected_args = [
-            "smbclient",
-            "-E",
-            f"//{addr}/{share}",
-            "-W",
-            f"{domain}",
-            "-U",
-            f"{user}%{passwd}",
-        ]
-        m.assert_called_once_with(
-            expected_args,
-            input=bytes(f"ls {remote_dir}", encoding="utf8"),
-            capture_output=True,
-        )
-        self.assertEqual((True, None), actual)
 
     def test_remove_file_is_successful(self):
-        m = Mock()
-        m.stdout = b"mock standard out"
-        m.stderr = b"mock standard error"
-        m.return_value = EvaluatedCommandResult(
-            returncode=0,
-            stdout=b"",
-            stderr=b"this is mock output sent to stderr",
-        )
-
-        addr = "1.2.3.4"
-        share = "testshare"
-        domain = "mock.local"
-        user = "mockuser"
-        passwd = "mockpass"
+        def mock_exec_func(repl, repl_cmd):
+            repl.run_command(repl_cmd)
+            return True, None
 
         remote_file = "alpha"
+        mock_repl = Mock(spec=pexpect.replwrap.REPLWrapper)
 
-        actual = remove_file(
+        _, delta = remove_file(
             remote_file,
-            ShareInfo(
-                addr="1.2.3.4",
-                share="testshare",
-                domain="mock.local",
-                user=user,
-                passwd=passwd,
-            ),
-            exec_func=m,
+            repl=mock_repl,
+            eval_line_func=mock_exec_func,
         )
 
-        expected_args = [
-            "smbclient",
-            "-E",
-            f"//{addr}/{share}",
-            "-W",
-            f"{domain}",
-            "-U",
-            f"{user}%{passwd}",
-        ]
-        m.assert_called_once_with(
-            expected_args,
-            input=bytes(f"rm {remote_file}", encoding="utf8"),
-            capture_output=True,
-        )
-        self.assertEqual((True, None), actual)
+        self.assertLess(delta, 1)  # This should be nearly instant
+        self.assertTrue(mock_repl.run_command.called)
+        self.assertTrue(mock_repl.run_command.call_args == call(f"rm {remote_file}"))
 
     def test_display_parsed_config(self):
         expected: str
@@ -218,9 +201,3 @@ class T(unittest.TestCase):
         ok, actual = parse_config_file("testdata/test1.conf")
         self.assertTrue(ok)
         self.assertEqual(expected, actual)
-
-    def test_eval_error(self):
-        actual = eval_error(b"alpha beta gamma\nNT_STATUS_TEST_TEST")
-        self.assertEqual((False, "NT_STATUS_TEST_TEST"), actual)
-        actual = eval_error(b"alpha beta gamma\n")
-        self.assertEqual((True, None), actual)

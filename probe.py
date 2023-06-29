@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-import argparse
-import io
 import logging
+import random
 import os
-import subprocess
+
+# import subprocess
 import sys
 import tempfile
 import time
+
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
-from threading import Lock, Thread
+from threading import Thread
+from typing import Callable, List, Tuple
+
+import pexpect
+import pexpect.replwrap
 
 from logfmter import Logfmter
-
 from prometheus_client import (
     Gauge,
     start_http_server,
@@ -21,6 +24,19 @@ from prometheus_client import (
     Histogram,
     # write_to_textfile,
 )
+
+from cli_arg_parse import parser
+from classes import ShareInfo, FailureCounts, Latencies, RandomDataFile
+from constants import DEFAULT_LOOP_INTERVAL, DEFAULT_NUM_FILES, IOSIZE
+
+
+EvalLineCallable = Callable[[pexpect.replwrap.REPLWrapper, str], Tuple[bool, str]]
+
+FilePutGetCallable = Callable[
+    [object, str, str, pexpect.replwrap.REPLWrapper, EvalLineCallable],
+    Tuple[bool, str],
+]
+
 
 SMB_STATUS = Gauge(
     "smb_service_state", "Current state of SMB service based on results of the probe"
@@ -52,228 +68,161 @@ PUT = object()
 GET = object()
 SHARE_ROOT = object()
 
-IOSIZE = 1 << 10
 
-DEFAULT_LOOP_INTERVAL = 5.0  # seconds
-
-DEFAULT_NUM_FILES = 5
-
-
-@dataclass
-class ShareInfo:
-    addr: str
-    share: str
-    domain: str
-    user: str
-    passwd: str
-
-
-@dataclass
-class FailureCounts:
-    read: int
-    write: int
-    unlink: int
-    ls_dir: int
-
-
-@dataclass
-class Latencies:
-    read_lat: List[float]
-    write_lat: List[float]
-    unlink_lat: List[float]
-    lsdir_lat: List[float]
-
-    def _median_lat(self, l):
-        # Even length of list case
-        if len(l) % 2 == 0:
-            two = l[len(l) // 2 - 1 : len(l) // 2 + 1]
-            return sum(two) / 2
-        # Odd length of list case
-        return l[len(l) // 2]
-
-    @property
-    def read_lat_median(self):
-        return self._median_lat(sorted(self.read_lat))
-
-    @property
-    def write_lat_median(self):
-        return self._median_lat(sorted(self.write_lat))
-
-    @property
-    def unlink_lat_median(self):
-        return self._median_lat(sorted(self.unlink_lat))
-
-    @property
-    def lsdir_lat_median(self):
-        return self._median_lat(sorted(self.lsdir_lat))
-
-    def read_lat_above_threshold(self, threshold: float) -> bool:
-        return self.read_lat_median > threshold
-
-    def write_lat_above_threshold(self, threshold: float) -> bool:
-        return self.write_lat_median > threshold
-
-    def unlink_lat_above_threshold(self, threshold: float) -> bool:
-        return self.unlink_lat_median > threshold
-
-    def lsdir_lat_above_threshold(self, threshold: float) -> bool:
-        return self.lsdir_lat_median > threshold
-
-
-class RandomDataFileError(Exception):
-    pass
-
-
-class RandomDataFile:
-    def __init__(self, size=10 * IOSIZE):
-        self._size = size
-        self._buffer = io.BytesIO()
-        self._lock = Lock()
-        self.initialized = False
-        self._init_random()
-
-    def __enter__(self):
-        if not self.initialized:
-            raise RandomDataFileError("random bytes buffer uninitialized")
-        return self.buffer
-
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        with self._lock:
-            self._buffer.close()
-            self._buffer = None
-            self.initialized = False
-
-    @property
-    def buffer(self):
-        return self._buffer
-
-    @property
-    def current_pos(self):
-        return self._buffer.seek(0, os.SEEK_CUR)
-
-    @property
-    def size(self):
-        return self._size
-
-    def rewind(self) -> int:
-        return self._buffer.seek(0)
-
-    def _init_random(self):
-        with self._lock:
-            if self.initialized:
-                return
-            iosize = IOSIZE if self.size > IOSIZE else self.size
-            rbytes = 0
-            try:
-                with open("/dev/urandom", "rb") as f:
-                    while rbytes < self.size:
-                        data = f.read(iosize)
-                        self._buffer.write(data)
-                        rbytes += len(data)
-            except IOError as err:
-                raise RandomDataFile(err.args)
-            self.rewind()
-            self.initialized = True
-
-
-def eval_error(output: bytes) -> Tuple[bool, str]:
-    """Evaluates output produced by the smbclient command and determines if the command failed.
+def timeit(func):
+    """Decorator which collects timing of whatever callable it wraps.
 
     Args:
-        output (bytes): Bytes from the smbclient command output.
+        func (Any): Function to decorate with the timer.
+    """
+
+    def wrapper(*args, **kwargs):
+        before = time.perf_counter()
+        result = func(*args, **kwargs)
+        return result, time.perf_counter() - before
+
+    return wrapper
+
+
+@timeit
+def login_and_get_repl(
+    si: ShareInfo,
+) -> Tuple[pexpect.replwrap.REPLWrapper | None, str | None]:
+    """Logs into the remote SMB server and initializes a REPL class for further interaction with the probe.
+
+    Args:
+        si (ShareInfo): Share description class.
 
     Returns:
-        Tuple[bool, str]: True and no message on success, False and message on failure.
+        Tuple[pexpect.replwrap.REPLWrapper | None, str | None]: Initialized REPL wrapper class or None on failure.
     """
-    if not output:
-        return False, "expected at least one line in output"
-    lines = output.split(b"\n")[1:]
-    lines = [i for i in lines if i != b""]
-    # Check if an error message is present in the output.
-    if not lines:
-        return True, None
-    for line in lines:
-        if line.startswith(b"NT_STATUS"):  # This is an error message
-            return False, str(lines[0], "utf-8")
+    addr = si.addr
+    share = si.share
+    domain = si.domain
+    user = si.user
+    passwd = si.passwd
+
+    cmd_str = f"smbclient -E //{addr}/{share} -W {domain} -U {user}%{passwd}"
+    try:
+        child = pexpect.spawn(cmd_str, encoding="utf8", echo=False)
+        replw = pexpect.replwrap.REPLWrapper(
+            child, orig_prompt=r"smb: \>", prompt_change=None
+        )
+        return replw, None
+    except pexpect.exceptions.EOF as err:
+        prefix = "before (last 100 chars): "
+        for token in err.value.split("\n"):
+            if token.startswith(prefix):
+                err_msg = token[len(prefix) + 1 : -5]
+        return None, f"login failed with message: {err_msg}"
+
+
+def close_connection(repl: pexpect.replwrap.REPLWrapper) -> Tuple[bool, str]:
+    """Logs off and closes the REPL.
+
+    Args:
+        repl (pexpect.replwrap.REPLWrapper): Initialized class connected with the smbclient shell.
+
+    Returns:
+        Tuple[bool, str]: True, None if succeeded, else False and error message.
+    """
+    ok, msg = eval_line_in_repl(repl, "logoff")
+    if not ok:
+        return ok, msg
+    ok, msg = eval_line_in_repl(repl, "quit")
+    if not ok:
+        return ok, msg
+
+
+def eval_line_in_repl(
+    replw: pexpect.replwrap.REPLWrapper, cmd_line: str
+) -> Tuple[bool, str | None]:
+    """Passes a command to the subprocess which is assumed to be running a REPL.
+
+    Args:
+        replw (pexpect.replwrap.REPLWrapper): REPL running as our child process.
+        cmd_line (str): Command which the REPL must execute and give results from.
+
+    Returns:
+        Tuple[bool, str]: True, None if succeeded, else False and error message.
+    """
+    try:
+        resp = replw.run_command(cmd_line)
+        if "NT_STATUS" in resp:
+            tokens = resp.split()
+            error_msg = f"smbclient failed evaluating: '{cmd_line}';  error: {' '.join(tokens[1:-1])}"
+            return False, error_msg
+    except pexpect.exceptions.TIMEOUT:
+        error_msg = f"smbclient timed out evaluating: '{cmd_line}'"
+        return False, error_msg
+    except pexpect.exceptions.EOF:
+        # There shouldn't be anything else to read, but if there is, read it
+        # and discard it, to make sure that we are not blocked in wait().
+        if replw.child.stdout.readable():
+            _ = replw.child.stdout.read()
+        if replw.child.stderr.readable():
+            _ = replw.child.stderr.read()
+        retcode = replw.child.wait()
+        succeeded = retcode == 0
+        return (
+            succeeded,
+            None if succeeded else f"Command exited with non-zero error: {retcode}",
+        )
     return True, None
 
 
+@timeit
 def list_directory(
-    remote_dir: str, si: ShareInfo, exec_func=subprocess.run
-) -> Tuple[bool, str]:
+    remote_dir: str,
+    repl: pexpect.replwrap.REPLWrapper = None,
+    eval_line_func: EvalLineCallable = eval_line_in_repl,
+) -> Tuple[bool, str | None]:
     """Lists contents of the directory on the SMB share.
 
     Args:
         remote_dir (str): Path to the directory on the SMB share.
-        si (ShareInfo): Share description class.
-        exec_func(Callable, optional): Callable used to execute the 'smbclient' command. Defaults to subprocess.run.
+        repl (pexpect.replwrap.REPLWrapper): Initialized class connected with the smbclient shell.
+        eval_line_func (EvalLineCallable, optional): Function with which to evaluate the REPL command. Defaults to eval_line_in_repl.
 
     Returns:
-        Tuple[bool, str]: True and no message on success, False and message on failure.
+        Tuple[bool, str|None]: True and no message on success, False and a message on failure.
     """
-    addr = si.addr
-    share = si.share
-    domain = si.domain
-    user = si.user
-    passwd = si.passwd
     if remote_dir == SHARE_ROOT:
-        arg = "ls"
+        repl_cmd = "ls"
     else:
-        arg = f"ls {remote_dir}"
-    result = exec_func(
-        f"smbclient -E //{addr}/{share} -W {domain} -U {user}%{passwd}".split(),
-        input=bytes(arg, "utf-8"),
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        return (
-            False,
-            f"failed to exec smbclient: {result.stderr.decode('utf-8').strip()}",
-        )
-    ok, msg = eval_error(result.stderr)
-    if not ok:
-        return False, f"list_directory: {msg}"
-    return True, None
+        repl_cmd = f"ls {remote_dir}"
+
+    return eval_line_func(repl, repl_cmd)
 
 
+@timeit
 def remove_file(
-    remote_file: str, si: ShareInfo, exec_func=subprocess.run
-) -> Tuple[bool, str]:
+    remote_file: str,
+    repl: pexpect.replwrap.REPLWrapper = None,
+    eval_line_func: EvalLineCallable = eval_line_in_repl,
+) -> Tuple[bool, str | None]:
+
     """Removes file on the SMB share.
 
     Args:
         remote_file (str): Path to the file on the SMB share.
-        si (ShareInfo): Share description class.
-        exec_func(Callable, optional): Callable used to execute the 'smbclient' command. Defaults to subprocess.run.
+        repl (pexpect.replwrap.REPLWrapper): Initialized class connected with the smbclient shell.
+        eval_line_func (EvalLineCallable, optional): Function with which to evaluate the REPL command. Defaults to eval_line_in_repl.
 
     Returns:
-        Tuple[bool, str]: True and no message on success, False and message on failure.
+        Tuple[bool, str|None]: True and no message on success, False and a message on failure.
     """
-    addr = si.addr
-    share = si.share
-    domain = si.domain
-    user = si.user
-    passwd = si.passwd
-    arg = f"rm {remote_file}"
-    result = exec_func(
-        f"smbclient -E //{addr}/{share} -W {domain} -U {user}%{passwd}".split(),
-        input=bytes(arg, "utf-8"),
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        return (
-            False,
-            f"failed to exec smbclient: {result.stderr.decode('utf-8').strip()}",
-        )
-    ok, msg = eval_error(result.stderr)
-    if not ok:
-        return False, f"remove_file: {msg}"
-    return True, None
+    repl_cmd = f"rm {remote_file}"
+    return eval_line_func(repl, repl_cmd)
 
 
 def file_put_get_impl(
-    direction: object, src_file, dst_file, si: ShareInfo, exec_func=subprocess.run
-) -> Tuple[bool, str]:
+    direction: object,
+    src_file,
+    dst_file,
+    repl: pexpect.replwrap.REPLWrapper = None,
+    eval_line_func: EvalLineCallable = eval_line_in_repl,
+) -> Tuple[bool, str | None]:
     """Implements the steps to place the file on the SMB share or retrieve the
     file from the SMB share.
 
@@ -281,77 +230,89 @@ def file_put_get_impl(
         direction (object): Whether this is a read or a write.
         src_file (str): Path to the source of the file.
         dst_file (str): Path to the destination of the file.
-        si (ShareInfo): Share description class.
-        exec_func(Callable, optional): Callable used to execute the 'smbclient' command. Defaults to subprocess.run.
+        repl (pexpect.replwrap.REPLWrapper): Initialized class connected with the smbclient shell.
+        eval_line_func(EvalLineCallable, optional): Callable used to execute the 'smbclient' command. Defaults to eval_line_in_repl.
 
     Returns:
-        Tuple[bool, str]: True and no message on success, False and message on failure.
+        Tuple[bool, str|None]: True and no message on success, False and a message on failure.
     """
-    addr = si.addr
-    share = si.share
-    domain = si.domain
-    user = si.user
-    passwd = si.passwd
     cmds = {
         GET: "get",
         PUT: "put",
     }
-    arg = f"{cmds[direction]} {src_file} {dst_file}"
-    result = exec_func(
-        f"smbclient -E //{addr}/{share} -W {domain} -U {user}%{passwd}".split(),
-        input=bytes(arg, "utf-8"),
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        return False, result.stderr.decode("utf8").strip()
-    ok, msg = eval_error(result.stderr)
-    if not ok:
-        return False, f"file_put_get_impl: {msg}"
-    return True, None
+    repl_cmd = f"{cmds[direction]} {src_file} {dst_file}"
+    return eval_line_func(repl, repl_cmd)
 
 
-def get_file(src_file, dst_file, si: ShareInfo) -> bool:
-    """Read a given file from the share into a file on the local filesystem.
-
-    Args:
-        src_file (str): Path to the source of the file.
-        dst_file (str): Path to the destination of the file.
-        si (ShareInfo): Share description class.
-
-    Returns:
-        bool: True if getting the file from the share succeeded, False otherwise.
-    """
-    return file_put_get_impl(GET, src_file, dst_file, si)
-
-
-def put_file(src_file, dst_file, si: ShareInfo) -> bool:
+@timeit
+def get_file(
+    src_file: str,
+    dst_file: str,
+    repl: pexpect.replwrap.REPLWrapper = None,
+    file_put_get_func: FilePutGetCallable = file_put_get_impl,
+) -> Tuple[bool, str]:
     """Write a given file from the local filesystem into a file on the share.
 
     Args:
         src_file (str): Path to the source of the file.
         dst_file (str): Path to the destination of the file.
-        si (ShareInfo): Share description class.
+        repl (pexpect.replwrap.REPLWrapper): Initialized class connected with the smbclient shell.
+        file_put_get_func (FilePutGetCallable, optional): Callable implementing get and put support. Defaults to file_put_get_impl.
 
     Returns:
-        bool: True if putting the file onto the share succeeded, False otherwise.
+        Tuple[bool, str]: True and no message on success, False and message on failure.
     """
-    return file_put_get_impl(PUT, src_file, dst_file, si)
+    return file_put_get_func(GET, src_file, dst_file, repl=repl)
+
+
+@timeit
+def put_file(
+    src_file: str,
+    dst_file: str,
+    repl: pexpect.replwrap.REPLWrapper = None,
+    file_put_get_func: FilePutGetCallable = file_put_get_impl,
+) -> Tuple[bool, str | None]:
+    """Write a given file from the local filesystem into a file on the share.
+
+    Args:
+        src_file (str): Path to the source of the file.
+        dst_file (str): Path to the destination of the file.
+        repl (pexpect.replwrap.REPLWrapper): Initialized class connected with the smbclient shell.
+        file_put_get_func (FilePutGetCallable, optional): Callable implementing get and put support. Defaults to file_put_get_impl.
+
+    Returns:
+        Tuple[bool, str|None]: True and no message on success, False and a message on failure.
+    """
+    return file_put_get_func(PUT, src_file, dst_file, repl=repl)
+
+
+def generate_random_name(n: int) -> str:
+    """Generates a random string used as filename.
+
+    Args:
+        n (int): Length of the random string to generate.
+
+    Returns:
+        str: Random string of length n.
+    """
+    chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    return "".join(random.sample(chars, n))
 
 
 def probe(
-    remote_file,
+    remote_base,
     si: ShareInfo,
-    nfiles=DEFAULT_NUM_FILES,
+    nrfiles=DEFAULT_NUM_FILES,
     size=4 * IOSIZE,
-    read_back=True,
-    unlink=True,
+    read_back=True,  # Deprecated, no-longer used
+    unlink=True,  # Deprecated, no-longer used
 ) -> Tuple[bool, Latencies, FailureCounts]:
     """Probes the SMB share by performing a number of basic file operations and collecting basic latency stats from these operations.
 
     Args:
-        remote_file (str): Path to file on the SMB share.
+        remote_base (str): Path to the directory (optionally root ".") on the SMB share.
         si (ShareInfo): Share description class.
-        nfiles (int, optional): Number of files to write, read and remove. Defaults to DEFAULT_NUM_FILES.
+        nrfiles (int, optional): Number of files to write, read and remove. Defaults to DEFAULT_NUM_FILES.
         size (int, optional): Size of the file(s) with which to operate. Defaults to 4*IOSIZE.
         read_back (bool, optional): Should the files be read back after having been written. Defaults to True.
         unlink (bool, optional): Should the files be removed after having been written. Defaults to True.
@@ -362,201 +323,128 @@ def probe(
     Returns:
         Tuple[bool, Latencies, FailureCounts]: First parameter includes overall success or failure of probe, second includes latencies of performed operations and third includes counts of failed operations.
     """
-    remote_path = Path(remote_file)
+    remote_prefix = Path(remote_base) / generate_random_name(10)
+    remote_path = Path(remote_prefix)  # This path is relative to the SMB share
     remote_dir = remote_path.parent
     succeeded = True
     read_latencies = []
     write_latencies = []
     unlink_latencies = []
     lsdir_latencies = []
-    fails = FailureCounts(0, 0, 0, 0)
+    login_latencies = []
+    fails = FailureCounts(0, 0, 0, 0, 0)
 
-    with tempfile.NamedTemporaryFile() as local_file:  # Will be deleted on close
-        with RandomDataFile(size=size) as buffer:
-            nwritten = local_file.write(buffer.read())
+    with tempfile.TemporaryDirectory() as td:  # Will be deleted on close
+        workdir = Path(td)
+        # Create a temporary working file in the temporary working directory.
+        local_file = workdir.joinpath("temp.data")
+        # Setup mappings between local file and remote file.
+        working_set = [
+            (
+                local_file,
+                remote_prefix.with_suffix("." + str(n)),
+            )
+            for n in range(0, nrfiles)
+        ]
+
+        with RandomDataFile(size) as buffer:
+            nwritten = local_file.write_bytes(buffer.read())
             if nwritten != size:
                 raise AssertionError("Did not write all bytes")
-            local_file.flush()  # flush the stream to make sure file had content
-            # PUT FILES onto SMB share
-            for i in range(nfiles):
-                start = time.time()
-                ok, msg = put_file(local_file.name, remote_file + f".{i}", si)
-                delta = time.time() - start
-                if not ok:
-                    fails.write += 1
-                    LOGGER.error(
-                        f"failed to write //{si.addr}/{si.share}/{remote_file}.{i} after {delta} seconds: {msg}"
-                    )
-                    succeeded = False
-                else:
-                    LOGGER.info(
-                        f"wrote {size} bytes to //{si.addr}/{si.share}/{remote_file}.{i} in {delta} seconds"
-                    )
-                write_latencies.append(delta)
-    # List the contents of the directory after putting the files there.
-    if remote_dir == ".":
-        start = time.time()
-        ok, msg = list_directory(SHARE_ROOT, si)
-        delta = time.time() - start
+
+            (replw, msg), delta = login_and_get_repl(si)
+            if not replw:
+                fails.login += 1
+                LOGGER.critical(msg)
+                succeeded = False
+                return (
+                    succeeded,
+                    Latencies(
+                        login_latencies,
+                        read_latencies,
+                        write_latencies,
+                        unlink_latencies,
+                        lsdir_latencies,
+                    ),
+                    fails,
+                )
+            login_latencies.append(delta)
+
+        # Put files onto SMB share.
+        for local, remote in working_set:
+            (ok, msg), delta = put_file(local, remote, repl=replw)
+            if not ok:
+                fails.write += 1
+                err_msg = f"failed to write //{si.addr}/{si.share}/{remote} after {delta} seconds: {msg}"
+                LOGGER.error(err_msg)
+                succeeded = False
+            else:
+                info_msg = f"wrote {size} bytes to //{si.addr}/{si.share}/{remote} in {delta} seconds"
+                LOGGER.info(info_msg)
+            write_latencies.append(delta)
+
+        # List the contents of the directory after putting the files there.
+        if remote_dir.as_posix() == ".":
+            remote_path = f"//{si.addr}/{si.share}"
+        else:
+            remote_path = f"//{si.addr}/{si.share}/{remote_dir}"
+
+        (ok, msg), delta = list_directory(SHARE_ROOT, repl=replw)
         if not ok:
             fails.ls_dir += 1
-            LOGGER.error(
-                f"failed to list contents of //{si.addr}/{si.share} after {delta} seconds: {msg}"
+            err_msg = (
+                f"failed to list contents of {remote_path} after {delta} seconds: {msg}"
             )
+            LOGGER.error(err_msg)
             succeeded = False
         else:
-            LOGGER.info(
-                f"listed contents //{si.addr}/{si.share} in {delta} seconds: {msg}"
-            )
-    else:
-        start = time.time()
-        ok, msg = list_directory(remote_dir, si)
-        delta = time.time() - start
-        if not ok:
-            fails.ls_dir += 1
-            LOGGER.error(
-                f"failed to list contents of the remote directory //{si.addr}/{si.share}/{remote_dir} after {delta} seconds: {msg}"
-            )
-            succeeded = False
-        else:
-            LOGGER.info(
-                f"listed contents of the remote directory //{si.addr}/{si.share}/{remote_dir} in {delta} seconds"
-            )
-    lsdir_latencies.append(delta)
-    if read_back:
-        for i in range(nfiles):
-            start = time.time()
-            ok, msg = get_file(remote_file + f".{i}", f"testfile.{i}", si)
-            delta = time.time() - start
+            info_msg = f"listed contents {remote_path} in {delta} seconds"
+            LOGGER.info(info_msg)
+        lsdir_latencies.append(delta)
+
+        for local, remote in working_set:
+            (ok, msg), delta = get_file(remote, local, repl=replw)
             if not ok:
                 fails.read += 1
-                LOGGER.error(
-                    f"failed to read //{si.addr}/{si.share}/{remote_file}.{i} after {delta} seconds: {msg}"
-                )
+                err_msg = f"failed to read //{si.addr}/{si.share}/{remote} after {delta} seconds: {msg}"
+                LOGGER.error(err_msg)
                 succeeded = False
             else:
-                LOGGER.info(
-                    f"read {size} bytes from {remote_file}.{i} in {delta} seconds"
-                )
-                os.unlink(f"testfile.{i}")
+                info_msg = f"read {size} bytes from //{si.addr}/{si.share}/{remote} in {delta} seconds"
+                LOGGER.info(info_msg)
+                os.unlink(local)
             read_latencies.append(delta)
-    if unlink:
-        for i in range(nfiles):
-            start = time.time()
-            ok, msg = remove_file(remote_file + f".{i}", si)
-            delta = time.time() - start
+
+        for local, remote in working_set:
+            (ok, msg), delta = remove_file(remote, repl=replw)
             if not ok:
                 fails.unlink += 1
-                LOGGER.error(
-                    f"failed to remove //{si.addr}/{si.share}/{remote_file}.{i} after {delta} seconds: {msg}"
-                )
+                err_msg = f"failed to remove //{si.addr}/{si.share}/{remote} after {delta} seconds: {msg}"
+                LOGGER.error(err_msg)
                 succeeded = False
             else:
-                LOGGER.info(
-                    f"removed {size} byte file //{si.addr}/{si.share}/{remote_file}.{i} in {delta} seconds"
-                )
+                info_msg = f"removed {size} byte file //{si.addr}/{si.share}/{remote} in {delta} seconds"
+                LOGGER.info(info_msg)
             unlink_latencies.append(delta)
 
+    close_connection(repl=replw)
     return (
         succeeded,
-        Latencies(read_latencies, write_latencies, unlink_latencies, lsdir_latencies),
+        Latencies(
+            login_latencies,
+            read_latencies,
+            write_latencies,
+            unlink_latencies,
+            lsdir_latencies,
+        ),
         fails,
     )
-
-
-parser = argparse.ArgumentParser(
-    description="A monitoring probe used to validate normal function of SMB server"
-)
-parser.add_argument(
-    "--address",
-    action="append",
-    dest="addresses",
-    required=True,
-    help="One or more address(es)/host/DNS names of the SMB server",
-)
-parser.add_argument(
-    "--share",
-    dest="share",
-    required=True,
-    help="Connection will be made to this share on the SMB server",
-)
-parser.add_argument(
-    "--domain",
-    dest="domain",
-    required=True,
-    help="The name of the domain within which this SMB server resides",
-)
-parser.add_argument(
-    "--username",
-    dest="username",
-    required=True,
-    help="Name of service account with which to connect and perform routine tests",
-)
-parser.add_argument(
-    "--password",
-    dest="password",
-    help="Password of service account with which to connect and perform routine tests (should probably come from the environment)",
-)
-parser.add_argument(
-    "--remote-file-prefix",
-    dest="remote_file",
-    default="testfile",
-    # required=True,
-    help="Path on the remote, inclusing partial file name used to construct multiple files during the routine test",
-)
-parser.add_argument(
-    "--interval",
-    dest="interval",
-    type=int,
-    default=300,
-    help="Probe execution interval in seconds",
-)
-parser.add_argument(
-    "--log-timestamp",
-    action=argparse.BooleanOptionalAction,
-    dest="log_timestamp",
-    type=bool,
-    default=True,
-    required=False,
-    help="Connection will be made to this share on the SMB server",
-)
-
-parser.add_argument(
-    "--read-latency-threshold",
-    dest="read_threshold",
-    type=float,
-    default=1.0,
-    help="Threshold for acceptable read latency in seconds",
-)
-
-parser.add_argument(
-    "--write-latency-threshold",
-    dest="write_threshold",
-    type=float,
-    default=1.0,
-    help="Threshold for acceptable write latency in seconds",
-)
-
-parser.add_argument(
-    "--ls_dir-latency-threshold",
-    dest="ls_dir_threshold",
-    type=float,
-    default=1.0,
-    help="Threshold for acceptable directory listing latency in seconds",
-)
-
-parser.add_argument(
-    "--unlink-latency-threshold",
-    dest="unlink_threshold",
-    type=float,
-    default=1.0,
-    help="Threshold for acceptable unlink latency in seconds",
-)
 
 
 def run_probe_and_alert(
     si: ShareInfo,
     remote_file: str,
+    login_thresh=2.0,
     read_thresh=1.0,
     write_thresh=1.0,
     ls_dir_thresh=1.0,
@@ -575,6 +463,9 @@ def run_probe_and_alert(
     ok, latencies, fails = probe(remote_file, si)
     healthy = ok
 
+    for o in latencies.login_lat:
+        SMB_OP_LATENCY.labels(si.addr, "login").observe(o)
+
     for o in latencies.read_lat:
         SMB_OP_LATENCY.labels(si.addr, "read").observe(o)
 
@@ -588,6 +479,12 @@ def run_probe_and_alert(
         SMB_OP_LATENCY.labels(si.addr, "unlink").observe(o)
 
     if latencies.read_lat_above_threshold(read_thresh):
+        healthy = False
+        # Raise a notification
+        SMB_HIGH_OP_LATENCY.labels(si.addr, "read").inc()
+        LOGGER.error("median read latency is above threshold")
+
+    if latencies.login_lat_above_threshold(login_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels(si.addr, "read").inc()
@@ -619,6 +516,8 @@ def run_probe_and_alert(
 
     # Check if any commands had failures and if so, increment the failure
     # counters.
+    if fails.login > 0:
+        SMB_OP_FAILED.labels(si.addr, "login").inc(1)  # Always one-count
     if fails.read > 0:
         SMB_OP_FAILED.labels(si.addr, "read").inc(fails.read)
 
@@ -712,11 +611,12 @@ if __name__ == "__main__":
     share = args.share
     username = args.username
     password = args.password
-    remote_file = args.remote_file
+    remote_basedir = args.remote_basedir
     interval = args.interval
     log_timestamp = args.log_timestamp
 
     # Thresholds from args
+    login_threshold = args.login_threshold
     read_threshold = args.read_threshold
     write_threshold = args.write_threshold
     ls_dir_threshold = args.ls_dir_threshold
@@ -752,12 +652,14 @@ if __name__ == "__main__":
             raise RuntimeError("No password for the probe service account")
         password = os.environ["SMB_MONITOR_PROBE_PASSWD"]
 
-    si_list: List[ShareInfo] = list()
+    si_list: List[ShareInfo] = []
     for addr in addresses:
+        SMB_HIGH_OP_LATENCY.labels(addr, "login").inc(0)
         SMB_HIGH_OP_LATENCY.labels(addr, "read").inc(0)
         SMB_HIGH_OP_LATENCY.labels(addr, "write").inc(0)
         SMB_HIGH_OP_LATENCY.labels(addr, "ls_dir").inc(0)
         SMB_HIGH_OP_LATENCY.labels(addr, "unlink").inc(0)
+        SMB_OP_FAILED.labels(addr, "login").inc(0)
         SMB_OP_FAILED.labels(addr, "read").inc(0)
         SMB_OP_FAILED.labels(addr, "write").inc(0)
         SMB_OP_FAILED.labels(addr, "ls_dir").inc(0)
@@ -767,17 +669,17 @@ if __name__ == "__main__":
     # Start up the server to expose the metrics.
     start_http_server(8000)
 
-    threads: List[Thread] = list()
+    threads: List[Thread] = []
     for idx, si in enumerate(si_list):
         print(si)
-        fname_indexed = f"{remote_file}.{idx}"
         threads.append(
             Thread(
                 target=repeat_forever,
                 args=(
                     run_probe_and_alert,
                     si,
-                    fname_indexed,  # Each thread gets its own filename prefix
+                    ".",
+                    login_threshold,
                     read_threshold,
                     write_threshold,
                     ls_dir_threshold,
