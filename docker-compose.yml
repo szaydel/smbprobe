@@ -28,7 +28,7 @@ services:
     restart: always
 
   probe:
-    image: rts/probe:test
+    image: rts/probe:latest
     volumes:
       - ./monitoring/probe.conf:/monitoring/probe.conf
     ports:
@@ -36,9 +36,10 @@ services:
     networks:
       - back-tier
     environment:
-      SMB_MONITOR_PROBE_PASSWD: Racktop1
       SMB_MONITOR_PROBE_CONFIGFILE: /monitoring/probe.conf
     restart: always
+    command:
+      # - '--config-file=/monitoring/probe.conf'
     # logging:
     #   driver: syslog
     #   options:

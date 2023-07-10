@@ -2,16 +2,13 @@
 import logging
 import random
 import os
-
-# import subprocess
 import sys
 import tempfile
 import time
 
-from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Callable, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 import pexpect
 import pexpect.replwrap
@@ -27,8 +24,12 @@ from prometheus_client import (
 
 from cli_arg_parse import parser
 from classes import ShareInfo, FailureCounts, Latencies, RandomDataFile
-from constants import DEFAULT_LOOP_INTERVAL, DEFAULT_NUM_FILES, IOSIZE
-
+from constants import (
+    DEFAULT_LOOP_INTERVAL,
+    DEFAULT_NUM_FILES,
+    IOSIZE,
+)
+from load_config import load_config, config_to_share_info_list
 
 EvalLineCallable = Callable[[pexpect.replwrap.REPLWrapper, str], Tuple[bool, str]]
 
@@ -39,25 +40,27 @@ FilePutGetCallable = Callable[
 
 
 SMB_STATUS = Gauge(
-    "smb_service_state", "Current state of SMB service based on results of the probe"
+    "smb_service_state",
+    "Current state of SMB service based on results of the probe",
+    labelnames=["address", "share", "domain"],
 )
 
 SMB_OP_LATENCY = Histogram(
     "smb_operation_latency_seconds",
     "Time it takes to complete a given SMB operation, such as read, write, lsdir, unlink",
-    labelnames=["address", "operation"],
+    labelnames=["address", "share", "domain", "operation"],
 )
 
 SMB_HIGH_OP_LATENCY = Counter(
     "smb_latency_above_threshold_total",
     "Count of times the probe detected high operation latency during a read, write, lsdir, unlink",
-    labelnames=["address", "operation"],
+    labelnames=["address", "share", "domain", "operation"],
 )
 
 SMB_OP_FAILED = Counter(
     "smb_operation_failed_total",
     "Number of times a particular probe operation did not succeed",
-    labelnames=["address", "operation"],
+    labelnames=["address", "share", "domain", "operation"],
 )
 
 DEFAULT_LOG_LEVEL = logging.DEBUG  # Change level to adjust output verbosity
@@ -132,6 +135,7 @@ def close_connection(repl: pexpect.replwrap.REPLWrapper) -> Tuple[bool, str]:
     ok, msg = eval_line_in_repl(repl, "quit")
     if not ok:
         return ok, msg
+    return True, None
 
 
 def eval_line_in_repl(
@@ -286,17 +290,17 @@ def put_file(
     return file_put_get_func(PUT, src_file, dst_file, repl=repl)
 
 
-def generate_random_name(n: int) -> str:
+def generate_random_name(length: int) -> str:
     """Generates a random string used as filename.
 
     Args:
-        n (int): Length of the random string to generate.
+        length (int): Length of the random string to generate.
 
     Returns:
         str: Random string of length n.
     """
     chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    return "".join(random.sample(chars, n))
+    return "".join(random.sample(chars, length))
 
 
 def probe(
@@ -304,8 +308,8 @@ def probe(
     si: ShareInfo,
     nrfiles=DEFAULT_NUM_FILES,
     size=4 * IOSIZE,
-    read_back=True,  # Deprecated, no-longer used
-    unlink=True,  # Deprecated, no-longer used
+    read_back=True,  # Deprecated, no-longer used #pylint: disable=unused-argument
+    unlink=True,  # Deprecated, no-longer used #pylint: disable=unused-argument
 ) -> Tuple[bool, Latencies, FailureCounts]:
     """Probes the SMB share by performing a number of basic file operations and collecting basic latency stats from these operations.
 
@@ -334,8 +338,8 @@ def probe(
     login_latencies = []
     fails = FailureCounts(0, 0, 0, 0, 0)
 
-    with tempfile.TemporaryDirectory() as td:  # Will be deleted on close
-        workdir = Path(td)
+    with tempfile.TemporaryDirectory() as tempdir:  # Will be deleted on close
+        workdir = Path(tempdir)
         # Create a temporary working file in the temporary working directory.
         local_file = workdir.joinpath("temp.data")
         # Setup mappings between local file and remote file.
@@ -463,72 +467,74 @@ def run_probe_and_alert(
     ok, latencies, fails = probe(remote_file, si)
     healthy = ok
 
-    for o in latencies.login_lat:
-        SMB_OP_LATENCY.labels(si.addr, "login").observe(o)
+    for sample in latencies.login_lat:
+        SMB_OP_LATENCY.labels(si.addr, si.share, si.domain, "login").observe(sample)
 
-    for o in latencies.read_lat:
-        SMB_OP_LATENCY.labels(si.addr, "read").observe(o)
+    for sample in latencies.read_lat:
+        SMB_OP_LATENCY.labels(si.addr, si.share, si.domain, "read").observe(sample)
 
-    for o in latencies.write_lat:
-        SMB_OP_LATENCY.labels(si.addr, "write").observe(o)
+    for sample in latencies.write_lat:
+        SMB_OP_LATENCY.labels(si.addr, si.share, si.domain, "write").observe(sample)
 
-    for o in latencies.lsdir_lat:
-        SMB_OP_LATENCY.labels(si.addr, "ls_dir").observe(o)
+    for sample in latencies.lsdir_lat:
+        SMB_OP_LATENCY.labels(si.addr, si.share, si.domain, "ls_dir").observe(sample)
 
-    for o in latencies.unlink_lat:
-        SMB_OP_LATENCY.labels(si.addr, "unlink").observe(o)
+    for sample in latencies.unlink_lat:
+        SMB_OP_LATENCY.labels(si.addr, si.share, si.domain, "unlink").observe(sample)
 
     if latencies.read_lat_above_threshold(read_thresh):
         healthy = False
         # Raise a notification
-        SMB_HIGH_OP_LATENCY.labels(si.addr, "read").inc()
+        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "read").inc()
         LOGGER.error("median read latency is above threshold")
 
     if latencies.login_lat_above_threshold(login_thresh):
         healthy = False
         # Raise a notification
-        SMB_HIGH_OP_LATENCY.labels(si.addr, "read").inc()
-        LOGGER.error("median read latency is above threshold")
+        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "login").inc()
+        LOGGER.error("login latency is above threshold")
 
     if latencies.write_lat_above_threshold(write_thresh):
         healthy = False
         # Raise a notification
-        SMB_HIGH_OP_LATENCY.labels(si.addr, "write").inc()
+        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "write").inc()
         LOGGER.error("median write latency is above threshold")
 
     if latencies.lsdir_lat_above_threshold(ls_dir_thresh):
         healthy = False
         # Raise a notification
-        SMB_HIGH_OP_LATENCY.labels(si.addr, "ls_dir").inc()
+        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "ls_dir").inc()
         LOGGER.error("median list directory latency is above threshold")
 
     if latencies.unlink_lat_above_threshold(unlink_thresh):
         healthy = False
         # Raise a notification
-        SMB_HIGH_OP_LATENCY.labels(si.addr, "unlink").inc()
+        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "unlink").inc()
         LOGGER.error("median unlink latency is above threshold")
 
     if not healthy:
         # Raise a notification
-        SMB_STATUS.set(1)
+        SMB_STATUS.labels(si.addr, si.share, si.domain).set(1)
     else:
-        SMB_STATUS.set(0)
+        SMB_STATUS.labels(si.addr, si.share, si.domain).set(0)
 
     # Check if any commands had failures and if so, increment the failure
     # counters.
     if fails.login > 0:
-        SMB_OP_FAILED.labels(si.addr, "login").inc(1)  # Always one-count
+        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "login").inc(
+            1
+        )  # Always one-count
     if fails.read > 0:
-        SMB_OP_FAILED.labels(si.addr, "read").inc(fails.read)
+        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "read").inc(fails.read)
 
     if fails.write > 0:
-        SMB_OP_FAILED.labels(si.addr, "write").inc(fails.write)
+        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "write").inc(fails.write)
 
     if fails.ls_dir > 0:
-        SMB_OP_FAILED.labels(si.addr, "ls_dir").inc(fails.ls_dir)
+        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "ls_dir").inc(fails.ls_dir)
 
     if fails.unlink > 0:
-        SMB_OP_FAILED.labels(si.addr, "unlink").inc(fails.unlink)
+        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "unlink").inc(fails.unlink)
 
     # write_to_textfile("raid.prom", #include registry parameter#)
 
@@ -555,33 +561,29 @@ def parse_config_file(config: str) -> Tuple[bool, List[str]]:
     return True, conf_lines
 
 
-def display_parsed_config(conf_lines: List[str]):
+def display_parsed_config(config: Dict[str, Any]):
     """Prints out the configuration with which we are running.
 
     Args:
-        conf_lines (List[str]): Parsed command line args as a list of arguments and values.
+        config (Dict[str, Any]): Parsed probe configuration.
     """
-    i = 0
-    while i < len(conf_lines):
-        if conf_lines[i] == "--password":
-            print(f"{conf_lines[i]:<20}\t=> ***SANITIZED***", file=sys.stderr)
-            i += 2
-        else:
-            # We are either at the end, or next elem is actually an argument,
-            # i.e. --foo as opposed to a paramater to this argument.
-            if i + 1 == len(conf_lines) or conf_lines[i + 1][0:2] == "--":
-                print(f"{conf_lines[i]:<20}", file=sys.stderr)
-                i += 1
-            else:
-                print(f"{conf_lines[i]:<20}\t=> {conf_lines[i+1]}", file=sys.stderr)
-                i += 2
+    targets_cnt = 0
+    lines = ""
+    for target, share_details in config.items():
+        if targets_cnt > 0:
+            lines += "\n"  # Add an extra line between target specifications
+        targets_cnt += 1
+        lines += f"[{targets_cnt}]    ---- {target} ----\n"
+        for key, value in share_details.items():
+            if key == "password" and not value.startswith("$ENV_"):
+                value = "***SANITIZED***"
+            lines += f"{key:<20}\t=> {value}\n"
+    print(lines[:-1], file=sys.stderr, flush=True, end=None)
 
 
 def repeat_forever(*func_with_args, **kwargs):
-    """Runs a callable which is in the 'func_with_args' forever in a loop."""
-    interval = DEFAULT_LOOP_INTERVAL
-    if "interval" in kwargs:
-        interval = kwargs["interval"]
+    """Runs  the 'func_with_args' callable in a forever loop."""
+    interval = kwargs.get("interval", DEFAULT_LOOP_INTERVAL)
     func, *args = func_with_args
     while True:
         func(*args)
@@ -589,40 +591,33 @@ def repeat_forever(*func_with_args, **kwargs):
 
 
 if __name__ == "__main__":
-    if "SMB_MONITOR_PROBE_CONFIGFILE" in os.environ:
-        ok, from_config = parse_config_file(os.environ["SMB_MONITOR_PROBE_CONFIGFILE"])
-        if ok:
-            print("Running SMB probe with the following parameters:", file=sys.stderr)
-            display_parsed_config(from_config)
-            args = parser.parse_args(from_config)
-            # print(args, file=sys.stderr)
-        else:
-            print(
-                f"Could not read arguments from {os.environ['SMB_MONITOR_PROBE_CONFIGFILE']}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-    else:  # Configuration file environment variable is not set
-        args = parser.parse_args()
-    # print(args, file=sys.stderr)
+    # Load arguments passed via the command line.
+    parsed_args = parser.parse_args()
 
-    addresses: List[str] = args.addresses
-    domain = args.domain
-    share = args.share
-    username = args.username
-    password = args.password
-    remote_basedir = args.remote_basedir
-    interval = args.interval
-    log_timestamp = args.log_timestamp
+    config_file_path = os.environ.get(
+        "SMB_MONITOR_PROBE_CONFIGFILE", parsed_args.config_file
+    )
+    config, msg = load_config(config_file_path)
+    if not config:
+        err_msg = f"Unable to load configuration from '{config_file_path}': {msg}"
+        LOGGER.critical(err_msg)
+        sys.exit(1)
+
+    display_parsed_config(config)
+    si_list = config_to_share_info_list(config)
+    if not si_list:
+        LOGGER.critical("No shares specified in the configuration; exiting")
+        sys.exit(1)
 
     # Thresholds from args
-    login_threshold = args.login_threshold
-    read_threshold = args.read_threshold
-    write_threshold = args.write_threshold
-    ls_dir_threshold = args.ls_dir_threshold
-    unlink_threshold = args.unlink_threshold
+    login_threshold = parsed_args.login_threshold
+    read_threshold = parsed_args.read_threshold
+    write_threshold = parsed_args.write_threshold
+    ls_dir_threshold = parsed_args.ls_dir_threshold
+    unlink_threshold = parsed_args.unlink_threshold
 
     # Setup logging configuration
+    log_timestamp = parsed_args.log_timestamp
     if log_timestamp:
         formatter = Logfmter(
             keys=["level", "ts"],
@@ -643,35 +638,23 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
 
-    # Get the password out of the environment instead of the `--password`
-    # parameter to the program. This should be done typically in any production
-    # setting so as to avoid having a password in cleartext in program
-    # arguments which could be inspected with tools like `ps`.
-    if not password:
-        if not "SMB_MONITOR_PROBE_PASSWD" in os.environ:
-            raise RuntimeError("No password for the probe service account")
-        password = os.environ["SMB_MONITOR_PROBE_PASSWD"]
-
-    si_list: List[ShareInfo] = []
-    for addr in addresses:
-        SMB_HIGH_OP_LATENCY.labels(addr, "login").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(addr, "read").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(addr, "write").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(addr, "ls_dir").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(addr, "unlink").inc(0)
-        SMB_OP_FAILED.labels(addr, "login").inc(0)
-        SMB_OP_FAILED.labels(addr, "read").inc(0)
-        SMB_OP_FAILED.labels(addr, "write").inc(0)
-        SMB_OP_FAILED.labels(addr, "ls_dir").inc(0)
-        SMB_OP_FAILED.labels(addr, "unlink").inc(0)
-        si_list.append(ShareInfo(addr, share, domain, username, password))
+    for si in si_list:
+        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "login").inc(0)
+        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "read").inc(0)
+        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "write").inc(0)
+        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "ls_dir").inc(0)
+        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "unlink").inc(0)
+        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "login").inc(0)
+        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "read").inc(0)
+        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "write").inc(0)
+        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "ls_dir").inc(0)
+        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "unlink").inc(0)
 
     # Start up the server to expose the metrics.
     start_http_server(8000)
 
     threads: List[Thread] = []
     for idx, si in enumerate(si_list):
-        print(si)
         threads.append(
             Thread(
                 target=repeat_forever,
@@ -685,7 +668,7 @@ if __name__ == "__main__":
                     ls_dir_threshold,
                     unlink_threshold,
                 ),
-                kwargs=dict(interval=interval),
+                kwargs=dict(interval=si.interval),
             )
         )
 

@@ -1,0 +1,61 @@
+name: SMB Probe integration test
+
+on:
+  push:
+  pull_request:
+    branches:
+      - '*'
+
+env:
+  TEST_IMAGE_NAME: szaydel/smbprobe
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2.9.1
+        with:
+          buildkitd-flags: --debug
+
+      - name: Extract Docker metadata
+        id: docker_meta
+        uses: docker/metadata-action@v4
+        with:
+          # list of Docker images to use as base name for tags
+          images: ${{ env.TEST_IMAGE_NAME }}
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+
+      - name: Build and push
+        id: docker_build
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          load: true
+          push: false # We do not want to push these images
+          tags: ${{ steps.docker_meta.outputs.tags }}
+
+      - name: Extract tag with the git short rev
+        id: extract_tag
+        run: |
+          echo "test_container_tag=$(jq -r '.tags[1]' <<< "${DOCKER_METADATA_OUTPUT_JSON}")" >> "$GITHUB_OUTPUT"
+
+      - name: Run end-to-end SMB Probe test
+        id: e2e_smbprobe_test
+        # Export tag into the environment making it accessible from the 
+        # docker-compose.yml file, which is used by the 'docker-test' target in
+        # the Makefile.
+        env:
+          TEST_IMAGE_TAG: ${{ steps.extract_tag.outputs.test_container_tag }}
+        run: gmake docker-test

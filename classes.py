@@ -7,13 +7,14 @@ from typing import List
 
 from constants import IOSIZE
 
-@dataclass
+@dataclass(frozen=True)
 class ShareInfo:
     addr: str
     share: str
     domain: str
     user: str
     passwd: str
+    interval: int = 30
 
 
 @dataclass
