@@ -1,0 +1,8 @@
+docker run \
+    -it \
+    --rm \
+    -p 139:139 \
+    -p 445:445 dperson/samba -p \
+    -w testdomain \
+    -u "probeuser;probepassword" \
+    -s "probe;/probe;yes;no;no;probeuser;probeuser;probeuser"

@@ -1,45 +1,54 @@
 import argparse
 
+from constants import DEFAULT_CONFIG_FILE
+
 parser = argparse.ArgumentParser(
-    description="A monitoring probe used to validate normal function of SMB server"
+    description="A monitoring probe used to validate normal function of SMB server",
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
+# parser.add_argument(
+#     "--address",
+#     action="append",
+#     dest="addresses",
+#     required=True,
+#     help="One or more address(es)/host/DNS names of the SMB server",
+# )
+# parser.add_argument(
+#     "--share",
+#     dest="share",
+#     required=True,
+#     help="Connection will be made to this share on the SMB server",
+# )
+# parser.add_argument(
+#     "--domain",
+#     dest="domain",
+#     required=True,
+#     help="The name of the domain within which this SMB server resides",
+# )
+# parser.add_argument(
+#     "--username",
+#     dest="username",
+#     required=True,
+#     help="Name of service account with which to connect and perform routine tests",
+# )
+# parser.add_argument(
+#     "--password",
+#     dest="password",
+#     help="Password of service account with which to connect and perform routine tests (should probably come from the environment)",
+# )
+# parser.add_argument(
+#     "--remote-basedir",
+#     dest="remote_basedir",
+#     default=".",
+#     # required=True,
+#     help="Path on the remote, inclusing partial file name used to construct multiple files during the routine test",
+# )
 parser.add_argument(
-    "--address",
-    action="append",
-    dest="addresses",
-    required=True,
-    help="One or more address(es)/host/DNS names of the SMB server",
+    "--config-file",
+    default=DEFAULT_CONFIG_FILE,
+    help="Location of the SMB probe's configuration file",
 )
-parser.add_argument(
-    "--share",
-    dest="share",
-    required=True,
-    help="Connection will be made to this share on the SMB server",
-)
-parser.add_argument(
-    "--domain",
-    dest="domain",
-    required=True,
-    help="The name of the domain within which this SMB server resides",
-)
-parser.add_argument(
-    "--username",
-    dest="username",
-    required=True,
-    help="Name of service account with which to connect and perform routine tests",
-)
-parser.add_argument(
-    "--password",
-    dest="password",
-    help="Password of service account with which to connect and perform routine tests (should probably come from the environment)",
-)
-parser.add_argument(
-    "--remote-basedir",
-    dest="remote_basedir",
-    default=".",
-    # required=True,
-    help="Path on the remote, inclusing partial file name used to construct multiple files during the routine test",
-)
+
 parser.add_argument(
     "--interval",
     dest="interval",
@@ -54,7 +63,7 @@ parser.add_argument(
     type=bool,
     default=True,
     required=False,
-    help="Connection will be made to this share on the SMB server",
+    help="Whether or not to prefix log lines with an ISO8601 timestamp",
 )
 
 parser.add_argument(
