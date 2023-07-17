@@ -37,7 +37,7 @@ jobs:
       # with sigstore/fulcio when running outside of PRs.
       id-token: write
 
-    name: Install Cosign
+    name: Build and optionally publish SMB Probe container
     steps:
       # Install the cosign tool except on PR
       # https://github.com/sigstore/cosign-installer
