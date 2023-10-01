@@ -10,6 +10,7 @@ from classes import FailureCounts, Latencies, Notification
 
 BETTERSTACK_INCIDENTS_URL = "https://uptime.betterstack.com/api/v2/incidents"
 PAGERDUTY_EVENTS_URL = "https://events.pagerduty.com/v2/enqueue"
+REQUESTBIN_TEST_BUCKET_URL = "https://enslrjfpu5yha.x.pipedream.net"
 
 
 def failure_counts_to_dict(fails: FailureCounts) -> Dict[str, List[float]]:
@@ -120,6 +121,17 @@ def betterstack_event_dest(
     url=URL(BETTERSTACK_INCIDENTS_URL),
     http_client=requests,
 ) -> Result:
+    """Generates an emits an event to betterstack.
+
+    Args:
+        data (Data): Data with which to build the payload.
+        dest (Notification): Destination to which the event will be sent.
+        url (_type_, optional): The URL to which the event will be POSTed. Defaults to URL(BETTERSTACK_INCIDENTS_URL).
+        http_client (_type_, optional): HTTP requests compatible http client. Defaults to requests.
+
+    Returns:
+        Result: The outcome of POSTing an event.
+    """
     url = dest.url if dest.url else url
     headers = dest.headers if dest.headers else dict()
     if headers.get("Authorization") is None:
@@ -143,9 +155,20 @@ def betterstack_event_dest(
 def requestbin_event_dest(
     data: Data,
     dest: Notification,
-    url=URL("https://enslrjfpu5yha.x.pipedream.net"),
+    url=URL(REQUESTBIN_TEST_BUCKET_URL),
     http_client=requests,
 ) -> Result:
+    """Generates and emits an event to requestbin.
+
+    Args:
+        data (Data): Data with which to build the payload.
+        dest (Notification): Destination to which the event will be sent.
+        url (_type_, optional): The URL to which the event will be POSTed. Defaults to URL(REQUESTBIN_TEST_BUCKET_URL).
+        http_client (_type_, optional): HTTP requests compatible http client. Defaults to requests.
+
+    Returns:
+        Result: The outcome of POSTing an event.
+    """
     url = dest.url if dest.url else url
     resp = http_client.post(url, json=data.as_dict, headers=dest.headers)
 
@@ -162,6 +185,17 @@ def pagerduty_event_dest(
     url=URL(PAGERDUTY_EVENTS_URL),
     http_client=requests,
 ) -> Result:
+    """Generates and emits an event to pagerduty.
+
+    Args:
+        data (Data): Data with which to build the payload.
+        dest (Notification): Destination to which the event will be sent.
+        url (_type_, optional): The URL to which the event will be POSTed. Defaults to URL(PAGERDUTY_EVENTS_URL).
+        http_client (_type_, optional): HTTP requests compatible http client. Defaults to requests.
+
+    Returns:
+        Result: The outcome of POSTing an event.
+    """
     fallback_summary = "Periodic SMB check on {data.target_address}/{data.target_share} experienced a problem"
     pager_duty_data = {
         "payload": {
@@ -182,10 +216,6 @@ def pagerduty_event_dest(
         resp_code=resp.status_code,
         resp_dict=resp.json(),
     )
-
-
-# def post_notification(data: Dict, post_func: WebhookPostFunc, headers=None) -> Result:
-#     return post_func(data, headers)
 
 
 class Targets(Enum):
