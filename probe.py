@@ -29,7 +29,7 @@ from constants import (
     DEFAULT_NUM_FILES,
     IOSIZE,
 )
-from load_config import load_config, config_to_share_info_list
+from load_config import load_config, config_to_share_info_list, display_parsed_config
 
 EvalLineCallable = Callable[[pexpect.replwrap.REPLWrapper, str], Tuple[bool, str]]
 
@@ -537,48 +537,6 @@ def run_probe_and_alert(
         SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "unlink").inc(fails.unlink)
 
     # write_to_textfile("raid.prom", #include registry parameter#)
-
-
-def parse_config_file(config: str) -> Tuple[bool, List[str]]:
-    """Parses configuration from file and produces a list of amounts to command line arguments.
-
-    Args:
-        config (str): Path to the configuration file.
-
-    Returns:
-        Tuple[bool, List[str]]: True if OK, False otherwise and argparse configuration parameters suitable for ingestion in parse_args.
-    """
-    conf_lines = []
-    try:
-        with open(config, "rb") as fp:
-            for line in fp.readlines():
-                if line.startswith(b"#"):  # Skip comment lines
-                    continue
-                tokens = line.decode("utf-8").strip().split()
-                conf_lines += tokens
-    except FileNotFoundError:
-        return False, []
-    return True, conf_lines
-
-
-def display_parsed_config(config: Dict[str, Any]):
-    """Prints out the configuration with which we are running.
-
-    Args:
-        config (Dict[str, Any]): Parsed probe configuration.
-    """
-    targets_cnt = 0
-    lines = ""
-    for target, share_details in config.items():
-        if targets_cnt > 0:
-            lines += "\n"  # Add an extra line between target specifications
-        targets_cnt += 1
-        lines += f"[{targets_cnt}]    ---- {target} ----\n"
-        for key, value in share_details.items():
-            if key == "password" and not value.startswith("$ENV_"):
-                value = "***SANITIZED***"
-            lines += f"{key:<20}\t=> {value}\n"
-    print(lines[:-1], file=sys.stderr, flush=True, end=None)
 
 
 def repeat_forever(*func_with_args, **kwargs):

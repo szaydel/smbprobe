@@ -1,0 +1,35 @@
+[[probes]]
+name = "" # This is optional and not yet used
+address = "10.2.2.23"
+domain = "racktoplabs.com"
+share = "smb01"
+username = "probeuser"
+password = "$ENV_PASSWORD_PROBE1"
+remote_basedir = "."
+interval = 5
+
+[[probes]]
+name = "" # This is optional and not yet used
+address = "10.2.2.123"
+domain = "racktoplabs.com"
+share = "smb02"
+username = "probeuser"
+password = "$ENV_PASSWORD_PROBE2"
+remote_basedir = "."
+interval = 5
+
+[[notifications]]
+headers = {"alpha-header" = "alpha", "beta-header" = "beta"}
+target = "request-bin"
+
+[[notifications]]
+url = "https://events.pagerduty.com/v2/enqueue"
+integration_key = "this-is-a-mock-key"
+severity = "error"
+target = "pager-duty"
+
+[[notifications]]
+url = "https://events.pagerduty.com/v2/enqueue"
+integration_key = "this-is-a-mock-key"
+severity = "error"
+target = "pager-duty"

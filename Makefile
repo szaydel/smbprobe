@@ -1,5 +1,5 @@
 .PHONY: docker-build, docker-build-test-image, \
-		docker-local-test, docker-test, setup
+		docker-local-test, docker-test, lint, setup
 
 CONTAINER_NAME = szaydel/smbprobe
 
@@ -20,6 +20,9 @@ docker-test:
 
 docker-local-test: docker-build-test-image
 	cd testing && bash probe-end-to-end-test.sh
+
+lint:
+	black *.py
 
 setup:
 	python3 -m venv venv && \

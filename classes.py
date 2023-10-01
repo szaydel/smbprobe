@@ -3,9 +3,10 @@ import os
 
 from dataclasses import dataclass
 from threading import Lock
-from typing import List
+from typing import Dict, List
 
 from constants import IOSIZE
+
 
 @dataclass(frozen=True)
 class ShareInfo:
@@ -132,3 +133,15 @@ class RandomDataFile:
                 raise RandomDataFileError(err.args) from err
             self.rewind()
             self.initialized = True
+
+
+@dataclass(frozen=True)
+class Notification:
+    url: str = None
+    integration_key: str = None
+    headers: Dict[str, str] = None
+    severity: str = None
+    source_email: str = None
+    summary: str = None
+    description: str = None
+    target: str = None

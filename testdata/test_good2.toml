@@ -1,17 +1,17 @@
-[[probes]
-address = "10.2.2.23"
-domain = "racktoplabs.com"
+[probe1]
+address = "server-pri.example.com"
+domain = "alpha.example.com"
 share = "smb01"
 username = "probeuser"
 password = "$ENV_PASSWORD_PROBE1"
 remote_basedir = "."
 interval = 5
 
-[[probes]]
-address = "10.2.2.123"
-domain = "racktoplabs.com"
+[probe2]
+address = "server-bkup.example.com"
+domain = "beta.example.com"
 share = "smb02"
 username = "probeuser"
 password = "$ENV_PASSWORD_PROBE2"
 remote_basedir = "."
-interval = 5
+interval = 25

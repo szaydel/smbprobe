@@ -1,4 +1,4 @@
-[probe1]
+[[probes]]
 address = "10.2.2.23"
 domain = "racktoplabs.com"
 share = "smb01"
@@ -7,7 +7,7 @@ password = "$ENV_PASSWORD_PROBE1"
 remote_basedir = "."
 interval = 5
 
-[probe2]
+[[probes]]
 address = "10.2.2.123"
 domain = "racktoplabs.com"
 share = "smb02"
