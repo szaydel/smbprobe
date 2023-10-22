@@ -61,7 +61,7 @@ class Data:
         return " ".join(tokens)
 
 
-def betterstack_description(data: Data) -> str:
+def betterstack_alert_body(data: Data) -> str:
     """Generates a string representation of the alert data suitable for use in the description field of the betterstack body.
 
     Args:
@@ -94,12 +94,23 @@ class URL:
     def __str__(self) -> str:
         if not self._subs:
             return self._url
-        return self._url_template.format(**self._subs)
+        try:
+            return self._url_template.format(**self._subs)
+        except KeyError as err:
+            missing_key = err.args[0]
+            raise KeyError(f"Missing substitution key: {missing_key}") from err
 
     def __repr__(self) -> str:
         if not self._subs:
             return "URL({url})".format(url=self._url)
-        return "URL({url}, subs={subs})".format(url=self._url_template, subs=self._subs)
+
+        try:
+            return "URL({url}, subs={subs})".format(
+                url=self._url_template, subs=self._subs
+            )
+        except KeyError as err:
+            missing_key = err.args[0]
+            raise KeyError(f"Missing substitution key: {missing_key}") from err
 
 
 @dataclass(frozen=True)
@@ -140,7 +151,7 @@ def betterstack_event_dest(
     fallback_summary = "Periodic SMB check on {data.target_address}/{data.target_share} experienced a problem"
     body = {
         "summary": dest.summary if dest.summary else fallback_summary,
-        "description": betterstack_description(data),
+        "description": betterstack_alert_body(data),
         "requester_email": dest.source_email,
     }
 
