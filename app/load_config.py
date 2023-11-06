@@ -183,9 +183,9 @@ def display_parsed_config(config: Dict[str, Any], file=sys.stderr):
     for section, section_data in config.items():
         if section == "probes":
             # for target, share_details in section.items():
-            lines += f"----------------------\n"
-            lines += f"--- PROBES SECTION ---\n"
-            lines += f"----------------------\n"
+            lines += "----------------------\n"
+            lines += "--- PROBES SECTION ---\n"
+            lines += "----------------------\n"
             for target in section_data:
                 if targets_cnt > 0:
                     lines += "\n"  # Add an extra line between target specifications
@@ -199,9 +199,9 @@ def display_parsed_config(config: Dict[str, Any], file=sys.stderr):
                     lines += f"{key:<20}\t=> {value}\n"
             lines += "\n"  # Add an extra line between sections
         else:  # notifications section
-            lines += f"-----------------------------\n"
-            lines += f"--- NOTIFICATIONS SECTION ---\n"
-            lines += f"-----------------------------\n"
+            lines += "-----------------------------\n"
+            lines += "--- NOTIFICATIONS SECTION ---\n"
+            lines += "-----------------------------\n"
             for dest in section_data:
                 if dests_cnt > 0:
                     lines += (

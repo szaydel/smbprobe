@@ -15,7 +15,7 @@ from load_config import load_config, config_to_share_info_list, display_parsed_c
 
 from log import LOGGER, DEFAULT_LOG_LEVEL
 
-from metrics import SMB_HIGH_OP_LATENCY, SMB_OP_FAILED, SMB_OP_LATENCY, SMB_STATUS
+from metrics import SMB_HIGH_OP_LATENCY, SMB_OP_FAILED
 
 from probe import repeat_forever, run_probe_and_alert
 

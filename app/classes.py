@@ -35,13 +35,13 @@ class Latencies:
     unlink_lat: List[float]
     lsdir_lat: List[float]
 
-    def _median_lat(self, l):
+    def _median_lat(self, latency):
         # Even length of list case
-        if len(l) % 2 == 0:
-            two = l[len(l) // 2 - 1 : len(l) // 2 + 1]
+        if len(latency) % 2 == 0:
+            two = latency[len(latency) // 2 - 1 : len(latency) // 2 + 1]
             return sum(two) / 2
         # Odd length of list case
-        return l[len(l) // 2]
+        return latency[len(latency) // 2]
 
     @property
     def login_lat_median(self):
