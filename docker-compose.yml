@@ -28,7 +28,7 @@ services:
     restart: always
 
   probe:
-    image: rts/probe:latest
+    image: docker.io/szaydel/smbprobe:505c076
     volumes:
       - ./monitoring/probe.conf:/monitoring/probe.conf
     ports:
