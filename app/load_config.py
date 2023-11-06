@@ -46,12 +46,13 @@ def probe_config_to_si(settings: Dict[str, str]) -> ShareInfo:
         raise RuntimeError("password is required for basic functionality")
 
     return ShareInfo(
-                addr=settings.get("address"),
-                share=settings.get("share"),
-                domain=settings.get("domain"),
-                user=settings.get("username"),
-                passwd=password,
-            )
+        addr=settings.get("address"),
+        share=settings.get("share"),
+        domain=settings.get("domain"),
+        user=settings.get("username"),
+        passwd=password,
+    )
+
 
 def config_to_share_info_list(config: Dict[str, Any]) -> List[ShareInfo]:
     si_list = []

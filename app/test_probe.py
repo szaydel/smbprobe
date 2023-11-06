@@ -5,15 +5,15 @@ from dataclasses import dataclass
 
 import pexpect.replwrap
 
+
+from load_config import display_parsed_config
 from probe import (
     GET,
     PUT,
-    display_parsed_config,
     file_put_get_impl,
     get_file,
     put_file,
     list_directory,
-    # parse_config_file,
     remove_file,
     timeit,
 )

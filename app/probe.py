@@ -1,35 +1,24 @@
-#!/usr/bin/env python3
-import logging
 import random
 import os
-import sys
 import tempfile
 import time
 
 from pathlib import Path
-from threading import Thread
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Callable, Tuple
 
 import pexpect
 import pexpect.replwrap
 
-from logfmter import Logfmter
-from prometheus_client import (
-    Gauge,
-    start_http_server,
-    Counter,
-    Histogram,
-    # write_to_textfile,
-)
-
-from cli_arg_parse import parser
 from classes import ShareInfo, FailureCounts, Latencies, RandomDataFile
 from constants import (
     DEFAULT_LOOP_INTERVAL,
     DEFAULT_NUM_FILES,
     IOSIZE,
 )
-from load_config import load_config, config_to_share_info_list, display_parsed_config
+
+from log import LOGGER
+
+from metrics import SMB_HIGH_OP_LATENCY, SMB_OP_FAILED, SMB_OP_LATENCY, SMB_STATUS
 
 EvalLineCallable = Callable[[pexpect.replwrap.REPLWrapper, str], Tuple[bool, str]]
 
@@ -37,35 +26,6 @@ FilePutGetCallable = Callable[
     [object, str, str, pexpect.replwrap.REPLWrapper, EvalLineCallable],
     Tuple[bool, str],
 ]
-
-
-SMB_STATUS = Gauge(
-    "smb_service_state",
-    "Current state of SMB service based on results of the probe",
-    labelnames=["address", "share", "domain"],
-)
-
-SMB_OP_LATENCY = Histogram(
-    "smb_operation_latency_seconds",
-    "Time it takes to complete a given SMB operation, such as read, write, lsdir, unlink",
-    labelnames=["address", "share", "domain", "operation"],
-)
-
-SMB_HIGH_OP_LATENCY = Counter(
-    "smb_latency_above_threshold_total",
-    "Count of times the probe detected high operation latency during a read, write, lsdir, unlink",
-    labelnames=["address", "share", "domain", "operation"],
-)
-
-SMB_OP_FAILED = Counter(
-    "smb_operation_failed_total",
-    "Number of times a particular probe operation did not succeed",
-    labelnames=["address", "share", "domain", "operation"],
-)
-
-DEFAULT_LOG_LEVEL = logging.DEBUG  # Change level to adjust output verbosity
-
-LOGGER = logging.getLogger("smb-probe")
 
 PUT = object()
 GET = object()
@@ -205,7 +165,6 @@ def remove_file(
     repl: pexpect.replwrap.REPLWrapper = None,
     eval_line_func: EvalLineCallable = eval_line_in_repl,
 ) -> Tuple[bool, str | None]:
-
     """Removes file on the SMB share.
 
     Args:
@@ -546,98 +505,3 @@ def repeat_forever(*func_with_args, **kwargs):
     while True:
         func(*args)
         time.sleep(interval)
-
-
-if __name__ == "__main__":
-    # Load arguments passed via the command line.
-    parsed_args = parser.parse_args()
-
-    config_file_path = os.environ.get(
-        "SMB_MONITOR_PROBE_CONFIGFILE", parsed_args.config_file
-    )
-    config, msg = load_config(config_file_path)
-    if not config:
-        err_msg = f"Unable to load configuration from '{config_file_path}': {msg}"
-        LOGGER.critical(err_msg)
-        sys.exit(1)
-
-    display_parsed_config(config)
-    si_list = config_to_share_info_list(config)
-    if not si_list:
-        LOGGER.critical("No shares specified in the configuration; exiting")
-        sys.exit(1)
-
-    # Thresholds from args
-    login_threshold = parsed_args.login_threshold
-    read_threshold = parsed_args.read_threshold
-    write_threshold = parsed_args.write_threshold
-    ls_dir_threshold = parsed_args.ls_dir_threshold
-    unlink_threshold = parsed_args.unlink_threshold
-
-    # Setup logging configuration
-    log_timestamp = parsed_args.log_timestamp
-    if log_timestamp:
-        formatter = Logfmter(
-            keys=["level", "ts"],
-            mapping={"level": "levelname", "ts": "asctime"},
-            datefmt="%Y-%m-%dT%H:%M:%S%z",
-        )
-    else:
-        formatter = Logfmter(
-            keys=["level"],
-            mapping={"level": "levelname"},
-        )
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    logging.basicConfig(
-        handlers=[handler],
-        format="%(asctime)s %(levelname)-8s %(message)s",
-        level=DEFAULT_LOG_LEVEL,
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-    )
-
-    for si in si_list:
-        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "login").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "read").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "write").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "ls_dir").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "unlink").inc(0)
-        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "login").inc(0)
-        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "read").inc(0)
-        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "write").inc(0)
-        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "ls_dir").inc(0)
-        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "unlink").inc(0)
-
-    # Start up the server to expose the metrics.
-    start_http_server(8000)
-
-    threads: List[Thread] = []
-    for idx, si in enumerate(si_list):
-        threads.append(
-            Thread(
-                target=repeat_forever,
-                args=(
-                    run_probe_and_alert,
-                    si,
-                    ".",
-                    login_threshold,
-                    read_threshold,
-                    write_threshold,
-                    ls_dir_threshold,
-                    unlink_threshold,
-                ),
-                kwargs=dict(interval=si.interval),
-            )
-        )
-
-    # Start all threads, do not wait on them here, instead join below.
-    for t in threads:
-        t.start()
-
-    # Wait for threads to terminate. Currently, there is no path leading to
-    # threads exiting thus allowing them to be join()ed. Therefore, this will
-    # just block forever. When we implement more sophistication and actually
-    # have a way for the thread to exit on its own, we will be ready for it
-    # here.
-    for t in threads:
-        t.join()

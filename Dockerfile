@@ -8,6 +8,6 @@ RUN pip install -r requirements.txt
 
 RUN mkdir /monitoring
 COPY app /monitoring/app
-RUN chmod +x /monitoring/app/probe.py
+RUN chmod +x /monitoring/app/main.py
 
-ENTRYPOINT [ "/monitoring/app/probe.py" ]
+ENTRYPOINT [ "/monitoring/app/main.py" ]
