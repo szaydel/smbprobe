@@ -21,7 +21,7 @@ services:
       SMB_MONITOR_PROBE_CONFIGFILE: /config/probe.conf
 
     links:
-      - samba
+      - samba:smb
     networks:
       - default
     ports:

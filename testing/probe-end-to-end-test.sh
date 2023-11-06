@@ -78,10 +78,10 @@ if ! awk 'BEGIN { count_failed=0; count_above_thresh=0; count_lat=0; }
     /smb_operation_failed_total/ {
         if ($2 > 0) { count_failed+=int($2); } 
     }
-    /smb_latency_above_threshold_total{address="samba",domain="TEST.DOMAIN",operation=".*",share="probe[1-2]"}/ { 
+    /smb_latency_above_threshold_total{address="smb",domain="TEST.DOMAIN",operation=".*",share="probe[1-2]"}/ {
         count_above_thresh += 1;
     }
-    /smb_operation_latency_seconds_count{address="samba",domain="TEST.DOMAIN",operation=".*",share="probe[1-2]"}/ {
+    /smb_operation_latency_seconds_count{address="smb",domain="TEST.DOMAIN",operation=".*",share="probe[1-2]"}/ {
         if ($2 > 0) { count_lat+=int($2); }
     }
     END {
