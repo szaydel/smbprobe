@@ -1,61 +1,81 @@
 version: '3.8'
 
-volumes:
-    prometheus_data: {}
-    probe_data: {}
+name: probe-validation
 
 networks:
-  back-tier:
+  default: {}
 
 services:
-  prometheus:
-    image: prom/prometheus:v2.39.0
-    volumes:
-      - ./prometheus/:/etc/prometheus/
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-    ports:
-      - 9090:9090
-    links:
-        - probe:probe
-    networks:
-      - back-tier
-    restart: always
-
   probe:
     # The value for this variable comes from .github/workflows/test-probe.yml.
+    # While testing locally, be sure to place this variableby exprting it in 
+    # your shell before running this stack, or running the end-2-end test 
+    # scripts.
     image: ${TEST_IMAGE_TAG}
     depends_on:
-      smb:
-        condition: service_started
-    links:
-      - smb
-    volumes:
-      - ./config/probe.conf:/config/probe.conf
-    ports:
-      - 8000:8000
-    networks:
-      - back-tier
+      samba:
+        condition: service_healthy
     environment:
       TZ: 'UTC'
       PROBE_ACCOUNT_PASSWORD: probepassword
       SMB_MONITOR_PROBE_CONFIGFILE: /config/probe.conf
-    restart: always
-    command:
 
-  smb:
-    image: dperson/samba
-    environment:
-      TZ: 'UTC'
+    links:
+      - samba
     networks:
-      - back-tier
+      - default
     ports:
-      - "137:137/udp"
-      - "138:138/udp"
-      - "139:139/tcp"
-      - "445:445/tcp"
-    command: '-u "probeuser;probepassword" -s "probe1;/probe1;yes;no;no;probeuser;probeuser;probeuser" -s "probe2;/probe2;yes;no;no;probeuser;probeuser;probeuser" -p -w test.domain'
+      - 8000:8000
+
+    restart: always
+    volumes:
+      - ./config/probe.conf:/config/probe.conf
+
+  samba:
+    image: ghcr.io/servercontainers/samba
+    depends_on:
+      volume_tweaks:
+        condition: service_completed_successfully
+    environment:
+      SAMBA_CONF_LOG_LEVEL: 3
+      SAMBA_CONF_WORKGROUP: TEST.DOMAIN
+      WSDD2_DISABLE: 1
+      AVAHI_DISABLE: 1
+      GROUP_probes: 1500
+      ACCOUNT_probeuser: probepassword
+      UID_probeuser: 1000
+      GROUPS_probeuser: probes
+      SAMBA_VOLUME_CONFIG_probe1: "[probe1]; path=/probe1; valid users = probeuser; guest ok = no; read only = no; browseable = yes; writeable = yes"
+      SAMBA_VOLUME_CONFIG_probe2: "[probe2]; path=/probe2; valid users = probeuser; guest ok = no; read only = no; browseable = yes; writeable = yes"
+
+    healthcheck:
+      test: ["CMD", "/usr/bin/nc", "-v", "-w2", "-z", "localhost", "445"]
+      interval: 4s
+      timeout: 2s
+      retries: 3
+      start_period: 60s
+      start_interval: 30s
+
+    networks:
+      - default
+    restart: always
+    volumes:
+      - samba_share_probe1:/probe1
+      - samba_share_probe2:/probe2
+
+  # This container is a hack of sorts. Its only purpose is to make minor 
+  # modifications to the permissions of the SMB test shares. We want to make 
+  # sure that the user(s) we create when we configure SAMBA will be able to 
+  # access the shares.
+  volume_tweaks:
+    image: alpine:latest
+    command: "/bin/sh -c '/bin/chmod 0775 /probe[12] && /bin/chgrp -R 1500 /probe[12]'"
+
+    restart: on-failure
+    volumes:
+      - samba_share_probe1:/probe1
+      - samba_share_probe2:/probe2
+
+volumes:
+  samba_share_probe1: {}
+  samba_share_probe2: {}

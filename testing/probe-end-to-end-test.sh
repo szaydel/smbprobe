@@ -6,9 +6,12 @@
 declare -A services
 services=(
     [0]=probe
-    [1]=prometheus
-    [2]=smb
+    [1]=samba
 )
+
+# This flag, if still zero after the service readiness check loop will result 
+# in the failing.
+ready=0
 
 function cleanup {
     docker compose down --timeout 4
@@ -33,10 +36,16 @@ while (( count < 30 )); do
         fi
     done
     if [ "${count_s}" -eq "${#services[@]}" ]; then
+        ready=1
         break
     fi
     sleep 0.5
 done
+
+if [ "${ready}" -eq 0 ]; then
+    echo "ERROR: Not all services were ready after 30 seconds" >&2
+    exit 1
+fi
 
 # Fetch metrics from the service and confirm that it is operational.
 have_ops=0
@@ -50,7 +59,7 @@ while (( count < 3 )); do
         /smb_operation_latency_seconds_count/ {
             if ($2 > 0) { count+=int($2); } 
         }
-        END { if (count < 5) {exit(1)}; }' < metrics.txt; then
+        END { if (count < 5) { exit(1)}; }' < metrics.txt; then
         have_ops=1
         break
     fi
@@ -69,10 +78,10 @@ if ! awk 'BEGIN { count_failed=0; count_above_thresh=0; count_lat=0; }
     /smb_operation_failed_total/ {
         if ($2 > 0) { count_failed+=int($2); } 
     }
-    /smb_latency_above_threshold_total{address="smb",domain="test.domain",operation=".*",share="probe[1-2]"}/ { 
+    /smb_latency_above_threshold_total{address="samba",domain="TEST.DOMAIN",operation=".*",share="probe[1-2]"}/ { 
         count_above_thresh += 1;
     }
-    /smb_operation_latency_seconds_count{address="smb",domain="test.domain",operation=".*",share="probe[1-2]"}/ {
+    /smb_operation_latency_seconds_count{address="samba",domain="TEST.DOMAIN",operation=".*",share="probe[1-2]"}/ {
         if ($2 > 0) { count_lat+=int($2); }
     }
     END {
