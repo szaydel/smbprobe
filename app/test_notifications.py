@@ -26,7 +26,7 @@ class TestNotifications(unittest.TestCase):
     def test_betterstack_alert_body(self):
         """Validates expected betterstack template output"""
         expected = ""
-        with open("testdata/notifications_betterstack_desc1.txt", "rt") as f:
+        with open("../testdata/notifications_betterstack_desc1.txt", "rt") as f:
             expected = f.read()
         data = Data(
             target_address="12.13.14.15",

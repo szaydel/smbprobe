@@ -59,13 +59,13 @@ def config_to_share_info_list(config: Dict[str, Any]) -> List[ShareInfo]:
         return []
 
     for key, settings in config.items():
-        print("key =", key, "settings =", settings, flush=True)
+        # print("key =", key, "settings =", settings, flush=True)
         if key != "probes":
             continue
         # print("key =", key, "settings =", settings)
         for probe in settings:
             si = probe_config_to_si(probe)
-            print("generated si:", si, flush=True)
+            # print("generated si:", si, flush=True)
             si_list.append(si)
         # password: str = settings.get("password")
         # if not password:
