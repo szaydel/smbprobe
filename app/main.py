@@ -24,28 +24,6 @@ if __name__ == "__main__":
     # Load arguments passed via the command line.
     parsed_args = parser.parse_args()
 
-    config_file_path = os.environ.get(
-        "SMB_MONITOR_PROBE_CONFIGFILE", parsed_args.config_file
-    )
-    config, msg = load_config(config_file_path)
-    if not config:
-        err_msg = f"Unable to load configuration from '{config_file_path}': {msg}"
-        LOGGER.critical(err_msg)
-        sys.exit(1)
-
-    display_parsed_config(config)
-    si_list = config_to_share_info_list(config)
-    if not si_list:
-        LOGGER.critical("No shares specified in the configuration; exiting")
-        sys.exit(1)
-
-    # Thresholds from args
-    login_threshold = parsed_args.login_threshold
-    read_threshold = parsed_args.read_threshold
-    write_threshold = parsed_args.write_threshold
-    ls_dir_threshold = parsed_args.ls_dir_threshold
-    unlink_threshold = parsed_args.unlink_threshold
-
     # Setup logging configuration
     log_timestamp = parsed_args.log_timestamp
     if log_timestamp:
@@ -67,6 +45,30 @@ if __name__ == "__main__":
         level=DEFAULT_LOG_LEVEL,
         datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
+
+    config_file_path = os.environ.get(
+        "SMB_MONITOR_PROBE_CONFIGFILE", parsed_args.config_file
+    )
+    config, msg = load_config(config_file_path)
+    if not config:
+        err_msg = f"Unable to load configuration from '{config_file_path}': {msg}"
+        LOGGER.critical(err_msg)
+        sys.exit(1)
+
+    display_parsed_config(config)
+    si_list = config_to_share_info_list(config)
+    if not si_list:
+        LOGGER.critical("No shares specified in the configuration; exiting")
+        sys.exit(1)
+
+    notifications = config["notifications"]
+
+    # Thresholds from args
+    login_threshold = parsed_args.login_threshold
+    read_threshold = parsed_args.read_threshold
+    write_threshold = parsed_args.write_threshold
+    ls_dir_threshold = parsed_args.ls_dir_threshold
+    unlink_threshold = parsed_args.unlink_threshold
 
     # We set certain counters to zero here as a way of pre-creating them so
     # that we always see them in the output of the metric queries, even if

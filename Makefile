@@ -21,8 +21,11 @@ docker-test:
 docker-local-test: docker-build-test-image
 	cd testing && bash probe-end-to-end-test.sh
 
-lint:
-	black *.py
+format:
+	black app/*.py
+
+lint: format
+	ruff check app/*py
 
 setup:
 	python3 -m venv venv && \

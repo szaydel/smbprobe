@@ -28,7 +28,6 @@ def load_config(filename: str) -> Tuple[dict[str, Any] | None, None | str]:
 
 
 def probe_config_to_si(settings: Dict[str, str]) -> ShareInfo:
-    print("settings: ", settings)
     password: str = settings.get("password")
     if not password:
         password = os.environ.get("SMB_MONITOR_PROBE_PASSWORD")
@@ -40,9 +39,7 @@ def probe_config_to_si(settings: Dict[str, str]) -> ShareInfo:
         # name.
         if password.startswith("$ENV_"):
             password = os.environ.get(password.removeprefix("$ENV_"))
-    print("PASSWORD:", password)
     if not password:
-        print("environmentL:", os.environ, flush=True)
         raise RuntimeError("password is required for basic functionality")
 
     return ShareInfo(

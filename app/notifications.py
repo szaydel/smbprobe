@@ -262,11 +262,15 @@ def post_notification(
     return result
 
 
-def post_all_notifications(data: Data, destinations: List[Notification]):
+def post_all_notifications(
+    data: Data, destinations: List[Notification]
+) -> List[Result]:
+    notification_results = []
     for dest in destinations:
         callable: WebhookPostFunc = target_to_callable(dest.target)
-        result = post_notification(data, dest)
-        print(callable, result)
+        result = post_notification(data, dest, callable=callable)
+        notification_results.append(result)
+    return notification_results
 
 
 test_notifications = [
