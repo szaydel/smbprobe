@@ -4,7 +4,18 @@ import tomllib
 
 from typing import Any, Dict, List, Tuple
 
-from classes import Notification, ShareInfo
+from common.classes import ShareInfo
+from common.notifications.classes import Notification
+from dynaconf import Dynaconf
+
+
+def initialize_configuration(*settings_files) -> Dynaconf:
+    settings = Dynaconf(
+        envvar_prefix="SMBPROBE",
+        # settings_files=settings_files,
+        core_loaders=["TOML"],
+    )
+    return settings
 
 
 def load_config(filename: str) -> Tuple[dict[str, Any] | None, None | str]:
@@ -49,6 +60,15 @@ def probe_config_to_si(settings: Dict[str, str]) -> ShareInfo:
         user=settings.get("username"),
         passwd=password,
     )
+
+
+def config_to_share_info_list2(settings: Dynaconf) -> List[ShareInfo]:
+    probes: List[dict] = settings.probes
+    si_list: List[ShareInfo] = []
+    for probe in probes:
+        si = probe_config_to_si(probe)
+        si_list.append(si)
+    return si_list
 
 
 def config_to_share_info_list(config: Dict[str, Any]) -> List[ShareInfo]:
@@ -208,4 +228,45 @@ def display_parsed_config(config: Dict[str, Any], file=sys.stderr):
                 lines += f"notification[{dests_cnt}]\n"
                 for key, value in dest.items():
                     lines += f"{key:<20}\t=> {value}\n"
+    print(lines[:-1], file=file, flush=True, end=None)
+
+
+def display_parsed_config_new(config: Dict[str, Any], file=sys.stderr):
+    """Prints out the configuration with which we are running.
+
+    Args:
+        config (Dict[str, Any]): Parsed probe configuration.
+    """
+    targets_cnt = 0
+    dests_cnt = 0
+    lines = ""
+
+    probes = config.probes
+    notifications = config.notifications
+
+    lines += "----------------------\n"
+    lines += "--- PROBES SECTION ---\n"
+    lines += "----------------------\n"
+    for target in probes:
+        if targets_cnt > 0:
+            lines += "\n"  # Add an extra line between target specifications
+        targets_cnt += 1
+        lines += f"probe[{targets_cnt}]\n"
+        for key, value in target.items():
+            if key == "name" and value == "":
+                value = "unnamed"
+            if key == "password" and not value.startswith("$ENV_"):
+                value = "***SANITIZED***"
+            lines += f"{key:<20}\t=> {value}\n"
+    lines += "\n"  # Add an extra line between sections
+    lines += "-----------------------------\n"
+    lines += "--- NOTIFICATIONS SECTION ---\n"
+    lines += "-----------------------------\n"
+    for dest in notifications:
+        if dests_cnt > 0:
+            lines += "\n"  # Add an extra line between destination specifications
+        dests_cnt += 1
+        lines += f"notification[{dests_cnt}]\n"
+        for key, value in dest.items():
+            lines += f"{key:<20}\t=> {value}\n"
     print(lines[:-1], file=file, flush=True, end=None)

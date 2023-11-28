@@ -1,5 +1,5 @@
 monitoring/
 testing/data/
-app/__pycache__/
+__pycache__
 /config
 venv

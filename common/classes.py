@@ -3,9 +3,9 @@ import os
 
 from dataclasses import dataclass
 from threading import Lock
-from typing import Dict, List
+from typing import List
 
-from constants import IOSIZE
+from common.constants import IOSIZE
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,15 @@ class FailureCounts:
     write: int
     unlink: int
     ls_dir: int
+
+    def as_dict(self):
+        return {
+            "login": self.login,
+            "read": self.read,
+            "write": self.write,
+            "unlink": self.unlink,
+            "ls_dir": self.ls_dir,
+        }
 
 
 @dataclass
@@ -77,6 +86,15 @@ class Latencies:
 
     def lsdir_lat_above_threshold(self, threshold: float) -> bool:
         return self.lsdir_lat_median > threshold
+
+    def as_dict(self):
+        return {
+            "login_lat": self.login_lat,
+            "read_lat": self.read_lat,
+            "write_lat": self.write_lat,
+            "unlink_lat": self.unlink_lat,
+            "lsdir_lat": self.lsdir_lat,
+        }
 
 
 class RandomDataFileError(Exception):
@@ -135,13 +153,13 @@ class RandomDataFile:
             self.initialized = True
 
 
-@dataclass(frozen=True)
-class Notification:
-    url: str = None
-    integration_key: str = None
-    headers: Dict[str, str] = None
-    severity: str = None
-    source_email: str = None
-    summary: str = None
-    description: str = None
-    target: str = None
+# @dataclass(frozen=True)
+# class Notification:
+#     url: str = None
+#     integration_key: str = None
+#     headers: Dict[str, str] = None
+#     severity: str = None
+#     source_email: str = None
+#     summary: str = None
+#     description: str = None
+#     target: str = None

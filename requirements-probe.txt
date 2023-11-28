@@ -1,5 +1,8 @@
+dynaconf==3.2.4
+hiredis==2.2.3
 logfmter==0.0.6
 pexpect==4.8.0
 prometheus-client==0.17.0
 PyYAML==6.0
-requests==2.31.0
+redis==5.0.1
+# requests==2.31.0

@@ -2,11 +2,10 @@ import requests
 
 from enum import Enum
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from classes import FailureCounts, Latencies, Notification
-
+from common.classes import FailureCounts, Latencies
+from common.notifications.classes import Data, Notification, Result
 
 BETTERSTACK_INCIDENTS_URL = "https://uptime.betterstack.com/api/v2/incidents"
 PAGERDUTY_EVENTS_URL = "https://events.pagerduty.com/v2/enqueue"
@@ -33,32 +32,32 @@ def latencies_to_dict(latencies: Latencies) -> Dict[str, float]:
     }
 
 
-@dataclass(frozen=True)
-class Data:
-    target_address: str
-    target_share: str
-    target_domain: str
+# @dataclass(frozen=True)
+# class Data:
+#     target_address: str
+#     target_share: str
+#     target_domain: str
 
-    latencies: Dict[str, List[float]]
-    failed_ops: Dict[str, bool]
+#     latencies: Dict[str, List[float]]
+#     failed_ops: Dict[str, bool]
 
-    @property
-    def as_dict(self):
-        return self.__dict__
+#     @property
+#     def as_dict(self):
+#         return self.__dict__
 
-    @property
-    def latencies_as_str(self):
-        tokens: List[str] = []
-        for op, value in self.latencies.items():
-            tokens.append(op + "=" + value.__str__())
-        return " ".join(tokens)
+#     @property
+#     def latencies_as_str(self):
+#         tokens: List[str] = []
+#         for op, value in self.latencies.items():
+#             tokens.append(op + "=" + value.__str__())
+#         return " ".join(tokens)
 
-    @property
-    def failed_ops_as_str(self):
-        tokens: List[str] = []
-        for op, value in self.failed_ops.items():
-            tokens.append(op + "=" + value.__str__())
-        return " ".join(tokens)
+#     @property
+#     def failed_ops_as_str(self):
+#         tokens: List[str] = []
+#         for op, value in self.failed_ops.items():
+#             tokens.append(op + "=" + value.__str__())
+#         return " ".join(tokens)
 
 
 def betterstack_alert_body(data: Data) -> str:
@@ -113,16 +112,6 @@ class URL:
             raise KeyError(f"Missing substitution key: {missing_key}") from err
 
 
-@dataclass(frozen=True)
-class Result:
-    """Result represents the outcome of an HTTP POST"""
-
-    success: bool
-    resp_code: int
-    resp_body: str | None = None
-    resp_dict: Dict[str, Any] | None = None
-
-
 WebhookPostFunc = Callable[[Dict[str, Any], Dict[str, str], Any], Result]
 
 
@@ -138,17 +127,24 @@ def betterstack_event_dest(
         data (Data): Data with which to build the payload.
         dest (Notification): Destination to which the event will be sent.
         url (_type_, optional): The URL to which the event will be POSTed. Defaults to URL(BETTERSTACK_INCIDENTS_URL).
-        http_client (_type_, optional): HTTP requests compatible http client. Defaults to requests.
+        http_client (requests.Request, optional): HTTP requests compatible http client. Defaults to requests.
 
     Returns:
         Result: The outcome of POSTing an event.
     """
     url = dest.url if dest.url else url
     headers = dest.headers if dest.headers else dict()
+    integration_key = dest.integration_key
+    if not integration_key:
+        return Result(
+            success=False,
+            resp_code=-1,
+            resp_dict=dict(),
+        )
     if headers.get("Authorization") is None:
         headers["Authorization"] = "Bearer " + dest.integration_key
 
-    fallback_summary = "Periodic SMB check on {data.target_address}/{data.target_share} experienced a problem"
+    fallback_summary = f"Periodic SMB check on {data.target_address}/{data.target_share} experienced a problem"
     body = {
         "summary": dest.summary if dest.summary else fallback_summary,
         "description": betterstack_alert_body(data),
@@ -207,7 +203,7 @@ def pagerduty_event_dest(
     Returns:
         Result: The outcome of POSTing an event.
     """
-    fallback_summary = "Periodic SMB check on {data.target_address}/{data.target_share} experienced a problem"
+    fallback_summary = f"Periodic SMB check on {data.target_address}/{data.target_share} experienced a problem"
     pager_duty_data = {
         "payload": {
             "summary": dest.summary if dest.summary else fallback_summary,
@@ -255,11 +251,11 @@ def target_to_callable(name: str, default=Targets.REQUEST_BIN) -> WebhookPostFun
 
 
 def post_notification(
-    data: Dict, dest: Notification, callable: WebhookPostFunc = target_to_callable
+    data: Data,
+    notification: Notification,
+    callable: WebhookPostFunc = target_to_callable,
 ) -> Result:
-    callable = callable(dest.target)
-    result = callable(data, dest)
-    return result
+    return callable(data, notification)
 
 
 def post_all_notifications(
@@ -269,6 +265,7 @@ def post_all_notifications(
     for dest in destinations:
         callable: WebhookPostFunc = target_to_callable(dest.target)
         result = post_notification(data, dest, callable=callable)
+        print("appending result", result, flush=True)
         notification_results.append(result)
     return notification_results
 

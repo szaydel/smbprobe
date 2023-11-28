@@ -4,17 +4,23 @@ import tempfile
 import time
 
 from pathlib import Path
+import redis
+import redis.exceptions
 from typing import Callable, Tuple
 
 import pexpect
 import pexpect.replwrap
 
-from classes import ShareInfo, FailureCounts, Latencies, RandomDataFile
-from constants import (
+from common.classes import ShareInfo, FailureCounts, Latencies, RandomDataFile
+
+from common.constants import (
     DEFAULT_LOOP_INTERVAL,
     DEFAULT_NUM_FILES,
+    DEFAULT_NOTIFICATIONS_LIST_NAME,
     IOSIZE,
 )
+
+from common.notifications.classes import Data
 
 from log import LOGGER
 
@@ -77,7 +83,7 @@ def login_and_get_repl(
         for token in err.value.split("\n"):
             if token.startswith(prefix):
                 err_msg = token[len(prefix) + 1 : -5]
-        return None, f"login failed with message: {err_msg}"
+        return None, f"login failed: {err_msg}"
 
 
 def close_connection(repl: pexpect.replwrap.REPLWrapper) -> Tuple[bool, str]:
@@ -318,7 +324,10 @@ def probe(
             (replw, msg), delta = login_and_get_repl(si)
             if not replw:
                 fails.login += 1
-                LOGGER.critical(msg)
+                LOGGER.critical(
+                    msg, extra=dict(address=si.addr, domain=si.domain, share=si.share)
+                )
+                succeeded = False
                 succeeded = False
                 return (
                     succeeded,
@@ -471,12 +480,6 @@ def run_probe_and_alert(
         SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "unlink").inc()
         LOGGER.error("median unlink latency is above threshold")
 
-    if not healthy:
-        # Raise a notification
-        SMB_STATUS.labels(si.addr, si.share, si.domain).set(1)
-    else:
-        SMB_STATUS.labels(si.addr, si.share, si.domain).set(0)
-
     # Check if any commands had failures and if so, increment the failure
     # counters.
     if fails.login > 0:
@@ -494,6 +497,33 @@ def run_probe_and_alert(
 
     if fails.unlink > 0:
         SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "unlink").inc(fails.unlink)
+
+    if not healthy:
+        LOGGER.error(
+            "share is unhealthy",
+            extra={"addr": si.addr, "domain": si.domain, "share": si.share},
+        )
+        # Raise a notification
+        SMB_STATUS.labels(si.addr, si.share, si.domain).set(1)
+
+        data = Data(
+            target_address=si.addr,
+            target_share=si.share,
+            target_domain=si.domain,
+            latencies=latencies.as_dict(),
+            failed_ops=fails.as_dict(),
+        )
+
+        r = redis.Redis(host="redis", port=6379, decode_responses=False)
+
+        # FIXME: This is likely to raise some exceptions, but we aren't
+        # handling any exceptions here at this point.
+        try:
+            _ = r.lpush(DEFAULT_NOTIFICATIONS_LIST_NAME, data.encode())
+        except redis.exceptions.ConnectionError as err:
+            LOGGER.critical(err)
+    else:
+        SMB_STATUS.labels(si.addr, si.share, si.domain).set(0)
 
     # write_to_textfile("raid.prom", #include registry parameter#)
 

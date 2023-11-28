@@ -10,8 +10,13 @@ from logfmter import Logfmter
 
 from prometheus_client import start_http_server
 
-from cli_arg_parse import parser
-from load_config import load_config, config_to_share_info_list, display_parsed_config
+from cli import parser
+
+from common.configuration import (
+    config_to_share_info_list2,
+    display_parsed_config_new,
+    initialize_configuration,
+)
 
 from log import LOGGER, DEFAULT_LOG_LEVEL
 
@@ -37,6 +42,7 @@ if __name__ == "__main__":
             keys=["level"],
             mapping={"level": "levelname"},
         )
+
     handler = logging.StreamHandler()
     handler.setFormatter(formatter)
     logging.basicConfig(
@@ -49,19 +55,25 @@ if __name__ == "__main__":
     config_file_path = os.environ.get(
         "SMB_MONITOR_PROBE_CONFIGFILE", parsed_args.config_file
     )
-    config, msg = load_config(config_file_path)
-    if not config:
-        err_msg = f"Unable to load configuration from '{config_file_path}': {msg}"
-        LOGGER.critical(err_msg)
-        sys.exit(1)
 
-    display_parsed_config(config)
-    si_list = config_to_share_info_list(config)
+    settings = initialize_configuration(config_file_path)
+    si_list = config_to_share_info_list2(settings)
+    display_parsed_config_new(settings)
+    # sys.exit(0)
+
+    # config, msg = load_config(config_file_path)
+    # if not config:
+    #     err_msg = f"Unable to load configuration from '{config_file_path}': {msg}"
+    #     LOGGER.critical(err_msg)
+    #     sys.exit(1)
+
+    # display_parsed_config(config)
+    # si_list = config_to_share_info_list(config)
     if not si_list:
         LOGGER.critical("No shares specified in the configuration; exiting")
         sys.exit(1)
 
-    notifications = config["notifications"]
+    # notifications = config["notifications"]
 
     # Thresholds from args
     login_threshold = parsed_args.login_threshold

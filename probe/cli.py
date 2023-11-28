@@ -1,6 +1,6 @@
 import argparse
 
-from constants import DEFAULT_CONFIG_FILE
+from common.constants import DEFAULT_CONFIG_FILE
 
 parser = argparse.ArgumentParser(
     description="A monitoring probe used to validate normal function of SMB server",
