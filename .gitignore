@@ -3,3 +3,4 @@ testing/data/
 __pycache__
 /config
 venv
+.env
