@@ -1,0 +1,82 @@
+{
+    "type": "message",
+    "attachments": [
+      {
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "contentUrl": null,
+        "content": {
+          "type": "AdaptiveCard",
+          "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+          "version": "1.6",
+          "body": [
+            {
+              "text": "Summary",
+              "type": "TextBlock",
+              "size": "extraLarge",
+              "style": "heading",
+              "weight": "bolder",
+              "wrap": true
+            },
+            {
+              "type": "TextBlock",
+              "text": "Periodic SMB probing on 192.168.100.101/test01 detected a problem",
+              "wrap": true
+            },
+            {
+              "text": "Probe Details",
+              "type": "TextBlock",
+              "size": "extraLarge",
+              "style": "heading",
+              "weight": "bolder",
+              "wrap": true
+            },
+            {
+              "type": "FactSet",
+              "facts": [
+                {
+                  "title": "Target Address",
+                  "value": "192.168.100.101"
+                },
+                {
+                  "title": "Target Share",
+                  "value": "test01"
+                },
+                {
+                  "title": "Target Domain",
+                  "value": "test.example.com"
+                }
+              ]
+            },
+            {
+              "text": "Latencies",
+              "type": "TextBlock",
+              "size": "extraLarge",
+              "style": "heading",
+              "weight": "bolder",
+              "wrap": true
+            },
+            {
+              "type": "TextBlock",
+              "text": "login=[2.4163775299154433, 4.457721214459032, 3.809273464213238, 3.8594737758377256, 2.9488558185249705] read=[2.4163775299154433, 4.457721214459032, 3.809273464213238, 3.8594737758377256, 2.9488558185249705] write=[2.4163775299154433, 4.457721214459032, 3.809273464213238, 3.8594737758377256, 2.9488558185249705] ls_dir=[2.4163775299154433, 4.457721214459032, 3.809273464213238, 3.8594737758377256, 2.9488558185249705] unlink=[2.4163775299154433, 4.457721214459032, 3.809273464213238, 3.8594737758377256, 2.9488558185249705]",
+              "wrap": true,
+              "fontType": "Monospace"
+            },
+            {
+              "text": "Failed Operations",
+              "type": "TextBlock",
+              "size": "extraLarge",
+              "style": "heading",
+              "weight": "bolder",
+              "wrap": true
+            },
+            {
+              "type": "TextBlock",
+              "text": "login=1 read=2 write=3 unlink=4 ls_dir=5",
+              "wrap": true,
+              "fontType": "Monospace"
+            }
+          ]
+        }
+      }
+    ]
+  }

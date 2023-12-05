@@ -1,9 +1,9 @@
 import argparse
 
 from common.constants import (
-    DEFAULT_ALERT_ON_FIRST_FAILURE,
     DEFAULT_CONFIG_FILE,
     DEFAULT_CONSECUTIVE_FAILS_LIMIT,
+    DEFAULT_POST_ALL_EVENTS,
 )
 
 parser = argparse.ArgumentParser(
@@ -36,11 +36,11 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--alert-on-first-failure",
+    "--post-all-events",
     type=bool,
-    default=DEFAULT_ALERT_ON_FIRST_FAILURE,
+    default=DEFAULT_POST_ALL_EVENTS,
     required=False,
-    help=f"Whether to emit notifications immediately after a failure or to use the threshold value. Default is {DEFAULT_ALERT_ON_FIRST_FAILURE}.",
+    help=f"Whether to emit notifications for every received event or on failure or once the threshold value has been reached. Default is {DEFAULT_POST_ALL_EVENTS}.",
 )
 
 parser.add_argument(

@@ -421,6 +421,7 @@ def run_probe_and_alert(
     write_thresh=1.0,
     ls_dir_thresh=1.0,
     unlink_thresh=1.0,
+    **kwargs,
 ):
     """Runs the probe and generates an alert if the probe fails or latencies are above threshold values.
 
@@ -432,8 +433,16 @@ def run_probe_and_alert(
         ls_dir_thresh (float, optional): Latency threshold for lsdir(s). Defaults to 1.0.
         unlink_thresh (float, optional): Latency threshold for unlink. Defaults to 1.0.
     """
+    conf = kwargs.get("conf")
+    if conf:
+        notifications = conf["notifications"]
+        notifications_enabled = len(notifications) > 0
+    else:
+        notifications_enabled = False
+
     ok, latencies, fails = probe(remote_file, si)
     healthy = ok
+    high_latency = False
 
     for sample in latencies.login_lat:
         SMB_OP_LATENCY.labels(si.addr, si.share, si.domain, "login").observe(sample)
@@ -480,6 +489,8 @@ def run_probe_and_alert(
         SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "unlink").inc()
         LOGGER.error("median unlink latency is above threshold")
 
+    high_latency = not healthy
+
     # Check if any commands had failures and if so, increment the failure
     # counters.
     if fails.login > 0:
@@ -505,13 +516,19 @@ def run_probe_and_alert(
         )
         # Raise a notification
         SMB_STATUS.labels(si.addr, si.share, si.domain).set(1)
+    else:
+        SMB_STATUS.labels(si.addr, si.share, si.domain).set(0)
 
+    # If notifications are configured, we assume them to be enabled. We will
+    # post notification whether or not there is an issue with the probe.
+    if notifications_enabled:
         data = Data(
             target_address=si.addr,
             target_share=si.share,
             target_domain=si.domain,
             latencies=latencies.as_dict(),
             failed_ops=fails.as_dict(),
+            high_latency=high_latency,
         )
 
         r = redis.Redis(host="redis", port=6379, decode_responses=False)
@@ -522,9 +539,6 @@ def run_probe_and_alert(
             _ = r.lpush(DEFAULT_NOTIFICATIONS_LIST_NAME, data.encode())
         except redis.exceptions.ConnectionError as err:
             LOGGER.critical(err)
-    else:
-        SMB_STATUS.labels(si.addr, si.share, si.domain).set(0)
-
     # write_to_textfile("raid.prom", #include registry parameter#)
 
 
@@ -533,5 +547,5 @@ def repeat_forever(*func_with_args, **kwargs):
     interval = kwargs.get("interval", DEFAULT_LOOP_INTERVAL)
     func, *args = func_with_args
     while True:
-        func(*args)
+        func(*args, **kwargs)
         time.sleep(interval)

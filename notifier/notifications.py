@@ -4,7 +4,7 @@ from enum import Enum
 from collections.abc import Callable
 from typing import Any, Dict, List
 
-from common.classes import FailureCounts, Latencies
+from classes import URL
 from common.notifications.classes import Data, Notification, Result
 
 BETTERSTACK_INCIDENTS_URL = "https://uptime.betterstack.com/api/v2/incidents"
@@ -12,52 +12,99 @@ PAGERDUTY_EVENTS_URL = "https://events.pagerduty.com/v2/enqueue"
 REQUESTBIN_TEST_BUCKET_URL = "https://enslrjfpu5yha.x.pipedream.net"
 
 
-def failure_counts_to_dict(fails: FailureCounts) -> Dict[str, List[float]]:
+def generate_summary(data: Data) -> str:
+    """Generates a summary line for use in notifications.
+
+    Args:
+        data (Data): Probe data from which the summary will be generated.
+
+    Returns:
+        str: Formatted summary line with details from the data
+    if data.is_unhealthy:
+    """
+    is_healthy = not data.is_unhealthy
+
+    if is_healthy:
+        return f"Periodic SMB probing on {data.target_address}/{data.target_share} which previously detected a problem is now healthy"
+    return f"Periodic SMB probing on {data.target_address}/{data.target_share} detected a problem"
+
+
+def msft_teams_alert_body_generator(data: Data) -> Dict:
+    """Generates a dictionary body suitable for posting to Microsoft Teams via a webhook.
+
+    Args:
+        data (Data): Data with which to build the payload.
+
+    Returns:
+        Dict: Complete payload to be POSTed to the incoming webhook of some MSFT teams channel.
+    """
+
+    def heading(text: str) -> Dict:
+        return {
+            "text": text,
+            "type": "TextBlock",
+            "size": "extraLarge",
+            "style": "heading",
+            "weight": "bolder",
+            "wrap": True,
+        }
+
+    summary = generate_summary(data)
+
     return {
-        "login": fails.login,
-        "read": fails.read,
-        "write": fails.write,
-        "ls_dir": fails.ls_dir,
-        "unlink": fails.unlink,
+        "type": "message",
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "contentUrl": None,
+                "content": {
+                    "type": "AdaptiveCard",
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "version": "1.6",
+                    "body": [
+                        heading("Summary"),
+                        {
+                            "type": "TextBlock",
+                            "text": summary,
+                            "wrap": True,
+                        },
+                        heading("Probe Details"),
+                        {
+                            "type": "FactSet",
+                            "facts": [
+                                {
+                                    "title": "Target Address",
+                                    "value": data.target_address,
+                                },
+                                {
+                                    "title": "Target Share",
+                                    "value": data.target_share,
+                                },
+                                {
+                                    "title": "Target Domain",
+                                    "value": data.target_domain,
+                                },
+                            ],
+                        },
+                        heading("Latencies"),
+                        {
+                            "type": "TextBlock",
+                            "text": data.latencies_as_str,
+                            "wrap": True,
+                            "fontType": "Monospace",
+                        },
+                        heading("Failed Operations"),
+                        {
+                            "type": "TextBlock",
+                            "text": data.failed_ops_as_str,
+                            "wrap": True,
+                            "fontType": "Monospace",
+                        },
+                    ],
+                },
+            }
+        ],
     }
-
-
-def latencies_to_dict(latencies: Latencies) -> Dict[str, float]:
-    return {
-        "login": latencies.login_lat,
-        "read": latencies.read_lat,
-        "write": latencies.write_lat,
-        "ls_dir": latencies.lsdir_lat,
-        "unlink": latencies.unlink_lat,
-    }
-
-
-# @dataclass(frozen=True)
-# class Data:
-#     target_address: str
-#     target_share: str
-#     target_domain: str
-
-#     latencies: Dict[str, List[float]]
-#     failed_ops: Dict[str, bool]
-
-#     @property
-#     def as_dict(self):
-#         return self.__dict__
-
-#     @property
-#     def latencies_as_str(self):
-#         tokens: List[str] = []
-#         for op, value in self.latencies.items():
-#             tokens.append(op + "=" + value.__str__())
-#         return " ".join(tokens)
-
-#     @property
-#     def failed_ops_as_str(self):
-#         tokens: List[str] = []
-#         for op, value in self.failed_ops.items():
-#             tokens.append(op + "=" + value.__str__())
-#         return " ".join(tokens)
 
 
 def betterstack_alert_body(data: Data) -> str:
@@ -78,40 +125,6 @@ def betterstack_alert_body(data: Data) -> str:
     )
 
 
-class URL:
-    """URL is a class that enables manipulation and representation of URLs with dynamic elements."""
-
-    def __init__(self, url: str, subs: Dict[str, str] = None) -> None:
-        self._subs = subs
-        self._url_template = None
-        self._url = None
-        if subs:
-            self._url_template = url
-        else:
-            self._url = url
-
-    def __str__(self) -> str:
-        if not self._subs:
-            return self._url
-        try:
-            return self._url_template.format(**self._subs)
-        except KeyError as err:
-            missing_key = err.args[0]
-            raise KeyError(f"Missing substitution key: {missing_key}") from err
-
-    def __repr__(self) -> str:
-        if not self._subs:
-            return "URL({url})".format(url=self._url)
-
-        try:
-            return "URL({url}, subs={subs})".format(
-                url=self._url_template, subs=self._subs
-            )
-        except KeyError as err:
-            missing_key = err.args[0]
-            raise KeyError(f"Missing substitution key: {missing_key}") from err
-
-
 WebhookPostFunc = Callable[[Dict[str, Any], Dict[str, str], Any], Result]
 
 
@@ -126,7 +139,7 @@ def betterstack_event_dest(
     Args:
         data (Data): Data with which to build the payload.
         dest (Notification): Destination to which the event will be sent.
-        url (_type_, optional): The URL to which the event will be POSTed. Defaults to URL(BETTERSTACK_INCIDENTS_URL).
+        url (URL, optional): The URL to which the event will be POSTed. Defaults to URL(BETTERSTACK_INCIDENTS_URL).
         http_client (requests.Request, optional): HTTP requests compatible http client. Defaults to requests.
 
     Returns:
@@ -135,18 +148,21 @@ def betterstack_event_dest(
     url = dest.url if dest.url else url
     headers = dest.headers if dest.headers else dict()
     integration_key = dest.integration_key
+
     if not integration_key:
         return Result(
             success=False,
             resp_code=-1,
             resp_dict=dict(),
         )
-    if headers.get("Authorization") is None:
-        headers["Authorization"] = "Bearer " + dest.integration_key
 
-    fallback_summary = f"Periodic SMB check on {data.target_address}/{data.target_share} experienced a problem"
+    summary = generate_summary(data)
+
+    if headers.get("Authorization") is None:
+        headers["Authorization"] = "Bearer " + integration_key
+
     body = {
-        "summary": dest.summary if dest.summary else fallback_summary,
+        "summary": dest.summary if dest.summary else summary,
         "description": betterstack_alert_body(data),
         "requester_email": dest.source_email,
     }
@@ -157,6 +173,59 @@ def betterstack_event_dest(
         resp_code=resp.status_code,
         resp_dict=resp.json(),
     )
+
+
+def _generic_event_common_impl(
+    data: Data,
+    dest: Notification,
+    url=URL(REQUESTBIN_TEST_BUCKET_URL),
+    http_client=requests,
+) -> Result:
+    url = dest.url if dest.url else url
+
+    summary = generate_summary(data)
+
+    payload = {
+        "probe_metrics": data.as_dict,
+        "summary": summary,
+    }
+
+    resp = http_client.post(url, json=payload, headers=dest.headers)
+
+    return Result(
+        success=resp.status_code == 200,
+        resp_code=resp.status_code,
+        resp_dict=resp.json(),
+    )
+
+
+def generic_event_dest(
+    data: Data,
+    dest: Notification,
+    url=None,
+    http_client=requests,
+) -> Result:
+    """Generates and emits an event to requestbin.
+
+    Args:
+        data (Data): Data with which to build the payload.
+        dest (Notification): Destination to which the event will be sent.
+        url (URL, optional): The URL to which the event will be POSTed. Defaults to URL(REQUESTBIN_TEST_BUCKET_URL).
+        http_client (requests, optional): HTTP requests compatible http client. Defaults to requests.
+
+    Returns:
+        Result: The outcome of POSTing an event.
+    """
+    url = dest.url
+
+    if not url:
+        return Result(
+            success=False,
+            resp_code=-1,
+            resp_dict=dict(),
+        )
+
+    return _generic_event_common_impl(data, dest, url, http_client)
 
 
 def requestbin_event_dest(
@@ -170,20 +239,13 @@ def requestbin_event_dest(
     Args:
         data (Data): Data with which to build the payload.
         dest (Notification): Destination to which the event will be sent.
-        url (_type_, optional): The URL to which the event will be POSTed. Defaults to URL(REQUESTBIN_TEST_BUCKET_URL).
-        http_client (_type_, optional): HTTP requests compatible http client. Defaults to requests.
+        url (URL, optional): The URL to which the event will be POSTed. Defaults to URL(REQUESTBIN_TEST_BUCKET_URL).
+        http_client (requests, optional): HTTP requests compatible http client. Defaults to requests.
 
     Returns:
         Result: The outcome of POSTing an event.
     """
-    url = dest.url if dest.url else url
-    resp = http_client.post(url, json=data.as_dict, headers=dest.headers)
-
-    return Result(
-        success=resp.status_code == 200,
-        resp_code=resp.status_code,
-        resp_dict=resp.json(),
-    )
+    return _generic_event_common_impl(data, dest, url, http_client)
 
 
 def pagerduty_event_dest(
@@ -197,21 +259,24 @@ def pagerduty_event_dest(
     Args:
         data (Data): Data with which to build the payload.
         dest (Notification): Destination to which the event will be sent.
-        url (_type_, optional): The URL to which the event will be POSTed. Defaults to URL(PAGERDUTY_EVENTS_URL).
-        http_client (_type_, optional): HTTP requests compatible http client. Defaults to requests.
+        url (URL, optional): The URL to which the event will be POSTed. Defaults to URL(PAGERDUTY_EVENTS_URL).
+        http_client (requests, optional): HTTP requests compatible http client. Defaults to requests.
 
     Returns:
         Result: The outcome of POSTing an event.
     """
-    fallback_summary = f"Periodic SMB check on {data.target_address}/{data.target_share} experienced a problem"
+
+    summary = generate_summary(data)
+
     pager_duty_data = {
         "payload": {
-            "summary": dest.summary if dest.summary else fallback_summary,
+            "summary": dest.summary if dest.summary else summary,
             "severity": dest.severity if dest.severity is not None else "error",
             "source": f"{data.target_address}/{data.target_share}",
             "custom_details": data.as_dict,
         },
-        "event_action": "trigger",
+        "dedup_key": data.correlation_id,
+        "event_action": "trigger" if data.is_unhealthy else "resolve",
         "routing_key": dest.integration_key,
     }
 
@@ -221,7 +286,44 @@ def pagerduty_event_dest(
     return Result(
         success=resp.status_code == 202,
         resp_code=resp.status_code,
-        resp_dict=resp.json(),
+        resp_body=resp.text,
+        resp_dict=resp.json() if resp.status_code == 202 else {},
+    )
+
+
+def msft_teams_event_dest(
+    data: Data,
+    dest: Notification,
+    url=None,
+    http_client=requests,
+) -> Result:
+    """Generates and emits an event to a Microsoft Teams Channel via Inbound Webhooks.
+
+    Args:
+        data (Data): Data with which to build the payload.
+        dest (Notification): Destination to which the event will be sent.
+        url (URL, optional): The URL to which the event will be POSTed.
+        http_client (requests, optional): HTTP requests compatible http client. Defaults to requests.
+
+    Returns:
+        Result: The outcome of POSTing an event.
+    """
+    url = dest.url
+
+    if not url:
+        return Result(
+            success=False,
+            resp_code=-1,
+            resp_dict=dict(),
+        )
+
+    adaptive_card = msft_teams_alert_body_generator(data)
+    resp = http_client.post(url, json=adaptive_card, headers=dest.headers)
+
+    return Result(
+        success=resp.status_code == 200,
+        resp_code=resp.status_code,
+        resp_dict=resp.json() if resp.status_code == 200 else None,
     )
 
 
@@ -231,6 +333,8 @@ class Targets(Enum):
     REQUEST_BIN = requestbin_event_dest
     PAGER_DUTY = pagerduty_event_dest
     BETTER_STACK = betterstack_event_dest
+    GENERIC_POST = generic_event_dest
+    MSFT_TEAMS = msft_teams_event_dest
 
 
 def target_to_callable(name: str, default=Targets.REQUEST_BIN) -> WebhookPostFunc:
@@ -244,9 +348,11 @@ def target_to_callable(name: str, default=Targets.REQUEST_BIN) -> WebhookPostFun
         WebhookPostFunc: Callable used to deliver content to the target Webhook listener.
     """
     return {
-        "request-bin": requestbin_event_dest,
-        "pager-duty": pagerduty_event_dest,
-        "better-stack": betterstack_event_dest,
+        "request-bin": Targets.REQUEST_BIN,
+        "pager-duty": Targets.PAGER_DUTY,
+        "better-stack": Targets.BETTER_STACK,
+        "generic-post": Targets.GENERIC_POST,
+        "msft-teams": Targets.MSFT_TEAMS,
     }.get(name, default)
 
 
@@ -265,7 +371,6 @@ def post_all_notifications(
     for dest in destinations:
         callable: WebhookPostFunc = target_to_callable(dest.target)
         result = post_notification(data, dest, callable=callable)
-        print("appending result", result, flush=True)
         notification_results.append(result)
     return notification_results
 
@@ -302,4 +407,5 @@ test_data = Data(
     target_domain="example.com",
     latencies={"login": 1, "read": 2, "write": 3, "ls_dir": 5, "unlink": 4},
     failed_ops=dict(login=1, read=2, write=3, unlink=4, ls_dir=5),
+    correlation_id="fake-correlation-id",
 )

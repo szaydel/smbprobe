@@ -1,13 +1,18 @@
+import os
+import sys
 import unittest
+
 from io import StringIO
 from unittest.mock import Mock, patch, call
 from dataclasses import dataclass
 
 import pexpect.replwrap
 
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from load_config import display_parsed_config
-from probe import (
+from common.configuration import display_parsed_config  # noqa: E402
+
+from .probe import (  # noqa: E402
     GET,
     PUT,
     file_put_get_impl,

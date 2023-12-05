@@ -1,8 +1,8 @@
 import io
 import unittest
 
-from classes import ShareInfo
-from load_config import config_to_si_list, load_config, display_parsed_config
+from common.classes import ShareInfo
+from common.configuration import config_to_si_list, load_config, display_parsed_config
 
 
 class TestConfig(unittest.TestCase):

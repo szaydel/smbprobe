@@ -9,3 +9,4 @@ PyYAML==6.0
 redis==5.0.1
 requests==2.31.0
 ruff==0.1.4
+requests-mock==1.11.0

@@ -10,7 +10,9 @@ class Data:
     target_domain: str
 
     latencies: Dict[str, List[float]]
-    failed_ops: Dict[str, bool]
+    failed_ops: Dict[str, int]
+    high_latency: bool = False
+    correlation_id: str = None
 
     @property
     def as_dict(self):
@@ -32,10 +34,33 @@ class Data:
 
     @property
     def id(self):
-        # return self.target_domain + "-" \
-        #     + self.target_address + "-" \
-        #     + self.target_share
         return (self.target_address, self.target_domain, self.target_share)
+    
+    @property
+    def is_unhealthy(self):
+        for _, failed in self.failed_ops.items():
+            if failed:
+                return True
+        return self.high_latency
+    
+    def copy_with_correlation_id(self, correlation_id: str):
+        latencies_copy: Dict[str, List[float]]
+        for k, v in self.latencies.items():
+            latencies_copy[k] = v.copy()
+
+        failed_ops_copy: Dict[str, bool]
+        for k, v in self.failed_ops.items():
+            failed_ops_copy[k] = v
+
+        return Data(
+            target_address=self.target_address,
+            target_domain=self.target_domain,
+            target_share=self.target_share,
+            latencies=latencies_copy,
+            failed_ops=failed_ops_copy,
+            high_latency=self.high_latency,
+            correlation_id=correlation_id,
+        )
 
     def encode(self):
         """Returns this object serialized with the pickle module.

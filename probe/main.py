@@ -13,7 +13,7 @@ from prometheus_client import start_http_server
 from cli import parser
 
 from common.configuration import (
-    config_to_share_info_list2,
+    config_to_share_info_list,
     display_parsed_config_new,
     initialize_configuration,
 )
@@ -57,23 +57,12 @@ if __name__ == "__main__":
     )
 
     settings = initialize_configuration(config_file_path)
-    si_list = config_to_share_info_list2(settings)
+    si_list = config_to_share_info_list(settings)
     display_parsed_config_new(settings)
-    # sys.exit(0)
 
-    # config, msg = load_config(config_file_path)
-    # if not config:
-    #     err_msg = f"Unable to load configuration from '{config_file_path}': {msg}"
-    #     LOGGER.critical(err_msg)
-    #     sys.exit(1)
-
-    # display_parsed_config(config)
-    # si_list = config_to_share_info_list(config)
     if not si_list:
         LOGGER.critical("No shares specified in the configuration; exiting")
         sys.exit(1)
-
-    # notifications = config["notifications"]
 
     # Thresholds from args
     login_threshold = parsed_args.login_threshold
@@ -115,7 +104,7 @@ if __name__ == "__main__":
                     ls_dir_threshold,
                     unlink_threshold,
                 ),
-                kwargs=dict(interval=si.interval),
+                kwargs=dict(interval=si.interval, conf=settings),
             )
         )
 

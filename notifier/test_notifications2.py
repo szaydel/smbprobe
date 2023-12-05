@@ -1,3 +1,5 @@
+import os
+import sys
 import unittest
 
 from io import BytesIO
@@ -5,7 +7,9 @@ import requests
 
 from unittest.mock import Mock
 
-from notifications import (
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
+from notifications import (  # noqa: E402
     betterstack_alert_body,
     betterstack_event_dest,
     Data,
