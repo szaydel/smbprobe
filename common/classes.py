@@ -15,6 +15,7 @@ class ShareInfo:
     domain: str
     user: str
     passwd: str
+    basedir: str = None
     interval: int = 30
 
 
@@ -151,15 +152,3 @@ class RandomDataFile:
                 raise RandomDataFileError(err.args) from err
             self.rewind()
             self.initialized = True
-
-
-# @dataclass(frozen=True)
-# class Notification:
-#     url: str = None
-#     integration_key: str = None
-#     headers: Dict[str, str] = None
-#     severity: str = None
-#     source_email: str = None
-#     summary: str = None
-#     description: str = None
-#     target: str = None

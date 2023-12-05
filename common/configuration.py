@@ -44,6 +44,17 @@ def load_config(filename: str) -> Tuple[dict[str, Any] | None, None | str]:
 
 
 def probe_config_to_si(settings: Dict[str, str]) -> ShareInfo:
+    """Converts a dictionary representation of the probe configuration to ShareInfo.
+
+    Args:
+        settings (Dict[str, str]): Settings for a probe taken from the config.
+
+    Raises:
+        RuntimeError: If password is expected in the environment and cannot be found, this is raised.
+
+    Returns:
+        ShareInfo: Class used throughout the probe for connecting and probing.
+    """
     password: str = settings.get("password")
     if not password:
         password = os.environ.get("SMB_MONITOR_PROBE_PASSWORD")
@@ -64,6 +75,7 @@ def probe_config_to_si(settings: Dict[str, str]) -> ShareInfo:
         domain=settings.get("domain"),
         user=settings.get("username"),
         passwd=password,
+        basedir=settings.get("remote_basedir"),
     )
 
 

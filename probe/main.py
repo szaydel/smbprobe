@@ -97,7 +97,8 @@ if __name__ == "__main__":
                 args=(
                     run_probe_and_alert,
                     si,
-                    ".",
+                    # FIXME: We should eliminate need for the following field.
+                    si.basedir,
                     login_threshold,
                     read_threshold,
                     write_threshold,
