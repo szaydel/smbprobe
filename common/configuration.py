@@ -220,7 +220,7 @@ def display_parsed_config_new(config: Dict[str, Any], file=sys.stderr):
     lines = ""
 
     probes = config.probes
-    notifications = config.notifications
+    notifications = config.get("notifications", [])
 
     lines += "----------------------\n"
     lines += "--- PROBES SECTION ---\n"

@@ -435,8 +435,8 @@ def run_probe_and_alert(
     """
     conf = kwargs.get("conf")
     if conf:
-        notifications = conf["notifications"]
-        notifications_enabled = len(notifications) > 0
+        notifications = conf.get("notifications")
+        notifications_enabled = 0 if not notifications else len(notifications) > 0
     else:
         notifications_enabled = False
 
