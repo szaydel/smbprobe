@@ -9,7 +9,7 @@ services=(
     [1]=samba
 )
 
-# This flag, if still zero after the service readiness check loop will result 
+# This flag, if still zero after the service readiness check loop will result
 # in the failing.
 ready=0
 
@@ -50,7 +50,7 @@ fi
 # Fetch metrics from the service and confirm that it is operational.
 have_ops=0
 count=0
-while (( count < 3 )); do
+while (( count < 30 )); do
 
     (( count++ ))
     curl -sfS localhost:8000/metrics | grep -E -v '^#' > metrics.txt
@@ -67,8 +67,8 @@ while (( count < 3 )); do
 done
 
 if [ ${have_ops} -eq 0 ]; then
+    echo "ERROR: Probe validation failed; check logs from the probe container below" >&2
     docker compose logs probe
-    echo "ERROR: Probe validation failed; check logs" >&2
     exit 1
 fi
 

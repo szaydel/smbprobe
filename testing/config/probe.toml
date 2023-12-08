@@ -1,0 +1,22 @@
+[[probes]]
+name = "" # This is optional and not yet used
+address = "smb"
+domain = "TEST.DOMAIN"
+share = "probe1"
+username = "probeuser"
+password = "@format {this.secrets.users.probeuser}"
+remote_basedir = "."
+interval = 5
+
+[[probes]]
+name = "" # This is optional and not yet used
+address = "smb"
+domain = "TEST.DOMAIN"
+share = "probe2"
+username = "probeuser"
+password = "@format {this.secrets.users.probeuser}"
+remote_basedir = "."
+interval = 5
+
+# [[notifications]]
+# There are no notifications defined in this file

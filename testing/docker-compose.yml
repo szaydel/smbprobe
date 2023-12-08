@@ -8,18 +8,14 @@ networks:
 services:
   probe:
     # The value for this variable comes from .github/workflows/test-probe.yml.
-    # While testing locally, be sure to place this variableby exprting it in 
-    # your shell before running this stack, or running the end-2-end test 
+    # While testing locally, be sure to replace this variable exporting it in
+    # your shell before running this stack, or running the end-2-end test
     # scripts.
     image: ${TEST_IMAGE_TAG}
     depends_on:
       samba:
         condition: service_healthy
-    environment:
-      TZ: 'UTC'
-      PROBE_ACCOUNT_PASSWORD: probepassword
-      SMB_MONITOR_PROBE_CONFIGFILE: /config/probe.conf
-
+    env_file: config/.env
     links:
       - samba:smb
     networks:
@@ -29,7 +25,8 @@ services:
 
     restart: always
     volumes:
-      - ./config/probe.conf:/config/probe.conf
+      - ./config/probe.toml:/config/probe.toml
+      - ./config/.secrets.toml:/config/.secrets.toml
 
   samba:
     image: ghcr.io/servercontainers/samba
