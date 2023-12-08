@@ -43,17 +43,6 @@ jobs:
 
     name: Build and optionally publish SMB Probe container
     steps:
-      - name: DEBUG -- github context
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
-        run: echo "$GITHUB_CONTEXT"
-      
-      - name: DEBUG -- dump github env variables
-        run: env
-
-      - name: DEBUG -- dump branch variable
-        run: echo "github.ref_name=${{ github.ref_name }} | github.refname=${{ github.refname }}"
-
       # Install the cosign tool except on PR
       # https://github.com/sigstore/cosign-installer
       - name: Install Cosign
