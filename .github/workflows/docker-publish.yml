@@ -89,12 +89,15 @@ jobs:
       - name: Extract Docker metadata
         id: docker_meta
         uses: docker/metadata-action@v4.1.1
+        env:
+          IMAGE_STABILITY: ${{ github.ref == 'refs/heads/main' && 'stable' || 'devel' }}
         with:
           images: ${{ env.REGISTRY }}/${{ matrix.image }}
           tags: |
             type=ref,prefix=,suffix=,format=short,event=branch
             type=ref,prefix=,suffix=,format=short,event=tag
             type=ref,prefix=,suffix=,format=short,event=pr
+            type=raw,prefix=,suffix=,value=${{ env.IMAGE_STABILITY }}
             type=raw,value=latest,enable={{is_default_branch}}
             type=schedule
             type=sha,prefix=,suffix=,format=short,event=branch
