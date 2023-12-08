@@ -1,0 +1,87 @@
+version: '3.7'
+
+volumes:
+    prometheus_data: {}
+    probe_data: {}
+    redis_data: {}
+
+networks:
+  back-tier:
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v2.39.0
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - 9090:9090
+    links:
+        - probe:probe
+    networks:
+      - back-tier
+    restart: always
+
+  # If these images were built as part of local development/experimentation,
+  # just change the name of the image to the local name/tag.
+  probe:
+    image: ghcr.io/szaydel/smbprobe:devel
+    depends_on:
+      - redis
+    env_file: config/.env
+    ports:
+      - 8000:8000
+    networks:
+      - back-tier
+    restart: always
+    volumes:
+      - ./config/probe.toml:/config/probe.toml
+      - ./config/.secrets.toml:/config/.secrets.toml
+
+  notifier:
+    image: ghcr.io/szaydel/smbprobe-notifier:devel
+    command:
+      - '--consecutive-fails-limit=2'
+    depends_on:
+      - redis
+    env_file: config/.env
+    networks:
+      - back-tier
+    restart: always
+    volumes:
+      - ./config/probe.toml:/config/probe.toml
+      - ./config/.secrets.toml:/config/.secrets.toml
+
+  # Redis is used as the message queue. The probe service pushes messages onto 
+  # the queue and the notifier service picks-up the messages from the queue and
+  # either posts them or ignores them, depending on the configuration.
+  redis:
+    image: redis:alpine
+    networks:
+      - back-tier
+    ports:
+      - 6379:6379
+    restart: always
+    volumes:
+      - redis_data:/data
+    # expose:
+    #   - 6379
+
+  # It is possible to enable forwarding of all gathered logs, i.e.
+  # stdout/stderr output from the probe and notifier services to a remote
+  # syslog destination by uncommenting the block below.
+
+    # logging:
+    #   driver: syslog
+    #   options:
+    #     syslog-address: "tcp://localhost:5514"
+    #     syslog-facility: 1
+    #     tag: smb-probe
+    #     # Possible formats are rfc3164, rfc5424, rfc5424micro
+    #     syslog-format: rfc3164
