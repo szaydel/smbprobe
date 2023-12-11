@@ -178,10 +178,17 @@ def betterstack_event_dest(
 def _generic_event_common_impl(
     data: Data,
     dest: Notification,
-    url=URL(REQUESTBIN_TEST_BUCKET_URL),
+    url: URL,
     http_client=requests,
 ) -> Result:
     url = dest.url if dest.url else url
+
+    if not url:
+        return Result(
+            success=False,
+            resp_code=-1,
+            resp_dict=dict(),
+        )
 
     summary = generate_summary(data)
 
@@ -210,21 +217,12 @@ def generic_event_dest(
     Args:
         data (Data): Data with which to build the payload.
         dest (Notification): Destination to which the event will be sent.
-        url (URL, optional): The URL to which the event will be POSTed. Defaults to URL(REQUESTBIN_TEST_BUCKET_URL).
+        url (URL, optional): The URL to which the event will be POSTed. Defaults to None.
         http_client (requests, optional): HTTP requests compatible http client. Defaults to requests.
 
     Returns:
         Result: The outcome of POSTing an event.
     """
-    url = dest.url
-
-    if not url:
-        return Result(
-            success=False,
-            resp_code=-1,
-            resp_dict=dict(),
-        )
-
     return _generic_event_common_impl(data, dest, url, http_client)
 
 
