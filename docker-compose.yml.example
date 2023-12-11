@@ -30,6 +30,7 @@ services:
 
   # If these images were built as part of local development/experimentation,
   # just change the name of the image to the local name/tag.
+  # To use the latest released image just replace :devel with :latest.
   probe:
     image: ghcr.io/szaydel/smbprobe:devel
     depends_on:
@@ -44,6 +45,7 @@ services:
       - ./config/probe.toml:/config/probe.toml
       - ./config/.secrets.toml:/config/.secrets.toml
 
+  # To use the latest released image just replace :devel with :latest.
   notifier:
     image: ghcr.io/szaydel/smbprobe-notifier:devel
     command:
