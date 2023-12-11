@@ -41,7 +41,7 @@ jobs:
           - image: '${{ github.repository }}-notifier'
             dockerfile: Dockerfile.notifier
 
-    name: Build and optionally publish SMB Probe container
+    name: Build and optionally publish probe and notifier containers
     steps:
       # Install the cosign tool except on PR
       # https://github.com/sigstore/cosign-installer

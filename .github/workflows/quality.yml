@@ -1,0 +1,32 @@
+name: SMB Probe unit tests and linting
+
+on:
+  push:
+  pull_request:
+    branches:
+      - '*'
+
+jobs:
+  probe-and-notifier-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.1.1
+
+      - name: Install dependencies
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: python3 -m venv venv && . venv/bin/activate && pip install -r requirements-dev.txt
+
+      - name: Lint and format the code
+        id: code-linting
+        run: . venv/bin/activate && gmake lint
+
+      - name: Run unit tests
+        id: unit-tests
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: . venv/bin/activate && gmake unittest
+
