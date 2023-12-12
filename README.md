@@ -175,7 +175,7 @@ target = "msft-teams"
 
 ## Outputs from the Probe
 ### Logging from the SMB probe container
-To make log-based metrics easier we include an example syslog configuration in the `docker-compose.yml` file. Uncommenting and configuring the `logging` section in the `probe` service block is going to enable automatic log forwarding via `syslog` to the configured destination. It is easy to test this locally with `netcat`, unless TLS configuration is enabled. Further details are available in Docker documentation about the [Docker Syslog logging driver](https://docs.docker.com/config/containers/logging/syslog).
+To make log-based metrics easier we include an example syslog configuration in the `docker-compose.yml.example` file. Uncommenting and configuring the `logging` section in the `probe` service block is going to enable automatic log forwarding via `syslog` to the configured destination. It is easy to test this locally with `netcat`, unless TLS configuration is enabled. Further details are available in Docker documentation about the [Docker Syslog logging driver](https://docs.docker.com/config/containers/logging/syslog).
 > If after enabling logging the following error is seen:
 > ```
 > Error response from daemon: failed to initialize logging driver: dial tcp <address>:<port>: connect: connection refused
