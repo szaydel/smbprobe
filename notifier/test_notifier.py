@@ -1,8 +1,11 @@
 import os
+import pickle
+import redis
 import sys
 import unittest
-
 import requests_mock
+
+from unittest.mock import Mock
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
@@ -13,6 +16,7 @@ from common.notifications.classes import Notification, Result  # noqa: E402
 from .notifier import (  # noqa: E402
     post_and_update_if_necessary,
     probe_state_notification_needed,
+    rpop_from_list_and_decode,
 )
 
 
@@ -304,3 +308,59 @@ class TestNotifier(unittest.TestCase):
         actual = probe_state_notification_needed(key, probes_health, incident_event_ids)
 
         self.assertFalse(actual)
+
+    def test_rpop_from_list_and_decode(self):
+        """Validates expected behaviour of the rpop_from_list_and_decode function"""
+        correlation_id = "alpha123"
+        mock_db = Mock(spec=redis.Redis)
+        data = Data(
+            target_address="192.168.100.101",
+            target_share="share",
+            target_domain="test.example.com",
+            latencies={"login": [0.1, 0.2, 0.3]},
+            failed_ops={
+                "login": 3,
+                "read": 0,
+                "write": 0,
+                "ls_dir": 0,
+                "unlink": 0,
+            },
+            correlation_id=correlation_id,
+        )
+        serialized = pickle.dumps(data)
+
+        mock_db.brpop = Mock(return_value=(None, serialized))
+
+        actual, err = rpop_from_list_and_decode(mock_db)
+
+        self.assertIsNone(err)
+        self.assertEqual(data, actual)
+
+    def test_rpop_from_list_and_decode_bad_data(self):
+        """Validates expected behaviour of the rpop_from_list_and_decode function with bad data"""
+        correlation_id = "alpha123"
+        mock_db = Mock(spec=redis.Redis)
+        data = Data(
+            target_address="192.168.100.101",
+            target_share="share",
+            target_domain="test.example.com",
+            latencies={"login": [0.1, 0.2, 0.3]},
+            failed_ops={
+                "login": 3,
+                "read": 0,
+                "write": 0,
+                "ls_dir": 0,
+                "unlink": 0,
+            },
+            correlation_id=correlation_id,
+        )
+        serialized = pickle.dumps(data)
+        serialized = serialized[: len(serialized) // 2] + b"this is just some garbage"
+
+        mock_db.brpop = Mock(return_value=(None, serialized))
+
+        actual, err = rpop_from_list_and_decode(mock_db)
+
+        self.assertIsNone(actual)
+        self.assertIsInstance(err, pickle.UnpicklingError)
+        self.assertEqual("pickle data was truncated", err.args[0])

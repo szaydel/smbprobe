@@ -19,10 +19,12 @@ from common.notifications.classes import Data, Notification, Result  # noqa: E40
 from notifications import (  # noqa: E402
     betterstack_alert_body,
     generate_summary,
+    generic_event_dest,
     msft_teams_alert_body_generator,
     pagerduty_event_dest,
     requestbin_event_dest,
     betterstack_event_dest,
+    target_to_callable,
 )
 
 
@@ -48,6 +50,15 @@ class TestNotifications(unittest.TestCase):
         integration_key="alphabetagammadelta",
         headers=None,
         target="request-bin",
+    )
+
+    GENERIC_EVENT_DEST = Notification(
+        url="https://generic.example.com/v2/notifications",
+        headers={
+            "test-header-1": "test-header-1-value",
+            "test-header-2": "test-header-2-value",
+        },
+        target="generic-post",
     )
 
     def test_generate_summary(self):
@@ -175,6 +186,59 @@ class TestNotifications(unittest.TestCase):
 
         self.assertEqual(expected, actual)
 
+    def test_generic_event_dest_success(self):
+        correlation_id = "alpha123"
+        mock_http_client = requests_mock.Mocker()
+        try:
+            mock_http_client.start()
+            mock_http_client.post(
+                self.GENERIC_EVENT_DEST.url,
+                status_code=200,
+                json={
+                    "status": "success",
+                    "message": "Thank you for posting this event",
+                },
+            )
+            data = Data(
+                target_address="192.168.100.101",
+                target_share="share",
+                target_domain="test.example.com",
+                latencies={"login": [0.1, 0.2, 0.3]},
+                failed_ops={
+                    "login": 3,
+                    "read": 0,
+                    "write": 0,
+                    "ls_dir": 0,
+                    "unlink": 0,
+                },
+                correlation_id=correlation_id,
+            )
+            actual = generic_event_dest(
+                data,
+                dest=self.GENERIC_EVENT_DEST,
+                url=self.GENERIC_EVENT_DEST.url,
+            )
+
+            self.assertTrue(mock_http_client.called)
+            self.assertEqual(
+                mock_http_client.request_history[0].json().get("probe_metrics"),
+                data.as_dict,
+            )
+            self.assertEqual(
+                Result(
+                    success=True,
+                    resp_code=200,
+                    resp_dict={
+                        "status": "success",
+                        "message": "Thank you for posting this event",
+                    },
+                ),
+                actual,
+            )
+
+        finally:
+            mock_http_client.stop()
+
     def test_pager_duty_event_dest_success(self):
         correlation_id = "alpha123"
         mock_http_client = requests_mock.Mocker()
@@ -189,25 +253,33 @@ class TestNotifications(unittest.TestCase):
                     "dedup_key": correlation_id,
                 },
             )
+            data = Data(
+                target_address="192.168.100.101",
+                target_share="share",
+                target_domain="test.example.com",
+                latencies={"login": [0.1, 0.2, 0.3]},
+                failed_ops={
+                    "login": 3,
+                    "read": 0,
+                    "write": 0,
+                    "ls_dir": 0,
+                    "unlink": 0,
+                },
+                correlation_id=correlation_id,
+            )
             actual = pagerduty_event_dest(
-                Data(
-                    target_address="192.168.100.101",
-                    target_share="share",
-                    target_domain="test.example.com",
-                    latencies={"login": [0.1, 0.2, 0.3]},
-                    failed_ops={
-                        "login": 3,
-                        "read": 0,
-                        "write": 0,
-                        "ls_dir": 0,
-                        "unlink": 0,
-                    },
-                    correlation_id=correlation_id,
-                ),
+                data,
                 dest=self.PAGER_DUTY_EVENT_DEST,
             )
 
             self.assertTrue(mock_http_client.called)
+            self.assertEqual(
+                mock_http_client.request_history[0]
+                .json()
+                .get("payload")
+                .get("custom_details"),
+                data.as_dict,
+            )
             self.assertEqual(
                 Result(
                     success=True,
@@ -268,6 +340,7 @@ class TestNotifications(unittest.TestCase):
             mock_http_client.stop()
 
     def test_requestbin_event_dest_success(self):
+
         correlation_id = "alpha123"
         mock_http_client = requests_mock.Mocker()
         try:
@@ -278,25 +351,30 @@ class TestNotifications(unittest.TestCase):
                 json={"success": True},
             )
 
+            data = Data(
+                target_address="192.168.100.101",
+                target_share="share",
+                target_domain="test.example.com",
+                latencies={"login": [0.1, 0.2, 0.3]},
+                failed_ops={
+                    "login": 3,
+                    "read": 0,
+                    "write": 0,
+                    "ls_dir": 0,
+                    "unlink": 0,
+                },
+                correlation_id=correlation_id,
+            )
             actual = requestbin_event_dest(
-                Data(
-                    target_address="192.168.100.101",
-                    target_share="share",
-                    target_domain="test.example.com",
-                    latencies={"login": [0.1, 0.2, 0.3]},
-                    failed_ops={
-                        "login": 3,
-                        "read": 0,
-                        "write": 0,
-                        "ls_dir": 0,
-                        "unlink": 0,
-                    },
-                    correlation_id=correlation_id,
-                ),
+                data,
                 dest=self.REQUEST_BIN_EVENT_DEST,
             )
 
             self.assertTrue(mock_http_client.called)
+            self.assertEqual(
+                mock_http_client.request_history[0].json().get("probe_metrics"),
+                data.as_dict,
+            )
             self.assertEqual(
                 Result(
                     success=True,
@@ -393,3 +471,24 @@ class TestNotifications(unittest.TestCase):
 
         self.assertFalse(result.success)
         self.assertEqual(result.resp_code, 401)
+
+    def test_target_to_callable(self):
+        """Validates that the correct callable is returned for a given target"""
+        cases = (
+            {
+                "name": "better-stack",
+                "expected": betterstack_event_dest,
+            },
+            {
+                "name": "pager-duty",
+                "expected": pagerduty_event_dest,
+            },
+            {
+                "name": "not-existent",
+                "expected": requestbin_event_dest,
+            },
+        )
+        for case in cases:
+            expected = case["expected"]
+            actual = target_to_callable(case["name"])
+            self.assertEqual(expected, actual)

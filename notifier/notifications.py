@@ -125,7 +125,7 @@ def betterstack_alert_body(data: Data) -> str:
     )
 
 
-WebhookPostFunc = Callable[[Dict[str, Any], Dict[str, str], Any], Result]
+PostFunc = Callable[[Dict[str, Any], Dict[str, str], Any], Result]
 
 
 def betterstack_event_dest(
@@ -335,7 +335,7 @@ class Targets(Enum):
     MSFT_TEAMS = msft_teams_event_dest
 
 
-def target_to_callable(name: str, default=Targets.REQUEST_BIN) -> WebhookPostFunc:
+def target_to_callable(name: str, default=Targets.REQUEST_BIN) -> PostFunc:
     """Returns a callable for the specified target name, if known, fallback to the default callable.
 
     Args:
@@ -343,7 +343,7 @@ def target_to_callable(name: str, default=Targets.REQUEST_BIN) -> WebhookPostFun
         default (Callable[[dict, str], Result], optional): Callable to return when no match for given name is found. Defaults to Targets.REQUEST_BIN.
 
     Returns:
-        WebhookPostFunc: Callable used to deliver content to the target Webhook listener.
+        PostFunc: Callable used to deliver content to the target Webhook listener.
     """
     return {
         "request-bin": Targets.REQUEST_BIN,
@@ -357,7 +357,7 @@ def target_to_callable(name: str, default=Targets.REQUEST_BIN) -> WebhookPostFun
 def post_notification(
     data: Data,
     notification: Notification,
-    callable: WebhookPostFunc = target_to_callable,
+    callable: PostFunc = target_to_callable,
 ) -> Result:
     return callable(data, notification)
 
@@ -367,7 +367,7 @@ def post_all_notifications(
 ) -> List[Result]:
     notification_results = []
     for dest in destinations:
-        callable: WebhookPostFunc = target_to_callable(dest.target)
+        callable: PostFunc = target_to_callable(dest.target)
         result = post_notification(data, dest, callable=callable)
         notification_results.append(result)
     return notification_results

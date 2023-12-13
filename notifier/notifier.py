@@ -76,6 +76,8 @@ def rpop_from_list_and_decode(
         data: Data = pickle.loads(item)
     except redis.exceptions.ConnectionError as err:
         return None, err
+    except pickle.UnpicklingError as err:
+        return None, err
     return data, None
 
 
