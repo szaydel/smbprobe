@@ -1,6 +1,7 @@
 monitoring/
 testing/data/
 __pycache__
-/config
+/config/.env
+/config/*.toml
 venv
 .env
