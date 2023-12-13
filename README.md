@@ -188,20 +188,21 @@ To make log-based metrics easier we include an example syslog configuration in t
 - `smb_latency_above_threshold_total` - Tracks whether the probe has observed excessive latency in one or more operations, by operation.
 - `smb_operation_failed_total` - Counts the number of operations that were not successful, by operation.
 
-### Development and experimentation
-#### Requirements
+## Development and experimentation
+### Requirements
 - Python 3
 - Docker with docker-compose support
 - Make (we assume GNU make)
 
-#### Docker images
+### Docker images
 During development after you make changes to the code it will be necessary to build new containers. Containers are built by executing `make docker-build-test-images`. Yes, we assume GNU Make is present on the system. Replace `make` with `gmake` if on your system `make` isn't an alias for `gmake`. This will generate the images that we will need to use with Docker's compose functionality. See `docker-compose.yml` for details. This file describes the entirety of the stack including Redis and Prometheus containers. It will be necessary to customize the `docker-compose.yml` file and change the image names/tags to reflect the names of the images built locally. Once the images are built and `docker-compose.yml` updated, you can start the stack locally by running `docker-compose up -d` from the root of the repository. This will start all the services in the background. To stop the stack run `docker-compose down`. It is perfectly fine to disable the Prometheus service container by commenting out the lines belonging to it in the `docker-compose.yml` file during development/experimentation. This is really the only truly optional container.
 
-#### Getting started
-My typical development environment relies of Python `virtualenv`, which makes it easy to maintain a self-contained, largely host-independent environment. There is a `requirements-dev.txt` file in the root of the repository that lists all the Python dependencies needed to lint, test, etc. To install them run `pip install -r requirements-dev.txt`.
+### Getting started
+My typical development environment uses the `virtualenv` Python module, which makes it easy to maintain a self-contained, largely host-independent environment. There is a `requirements-dev.txt` file in the root of the repository that lists all the Python dependencies needed to lint, test, etc. If you already enabled `virtualenv` or choose not to use it for any reason, install these requirements with `pip install -r requirements-dev.txt`. Otherwise, to setup a branch new development area, run `make setup`, which will create a new `virtualenv` environment in the `venv` directory and install the necessary dependencies.
 
+### Testing and code formatting
 #### Unit tests
 There is unit test coverage, somewhat porous but existing and needs more work. Please, be sure to run tests with `make unittest`.
 
-#### Formatting and linting
+#### Style and linting
 We use `black` and `ruff` to format and lint the code. To run them locally run `make lint`.

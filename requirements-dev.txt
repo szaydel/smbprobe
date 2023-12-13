@@ -5,8 +5,7 @@ logfmter==0.0.6
 pexpect==4.8.0
 prometheus-client==0.17.0
 ptpython==3.0.23
-PyYAML==6.0
 redis==5.0.1
+requests-mock==1.11.0
 requests==2.31.0
 ruff==0.1.4
-requests-mock==1.11.0
