@@ -79,7 +79,7 @@ def main():
 
     notifications: List[Notification] = []
 
-    for item in settings.notifications:
+    for item in settings.get("notifications", []):
         notifications.append(
             Notification(
                 url=item.get("url"),
