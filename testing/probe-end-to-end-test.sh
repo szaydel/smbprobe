@@ -50,11 +50,13 @@ fi
 # Fetch metrics from the service and confirm that it is operational.
 have_ops=0
 count=0
-while (( count < 30 )); do
-
+while (( count < 60 )); do
     (( count++ ))
-    curl -sfS localhost:8000/metrics | grep -E -v '^#' > metrics.txt
-    # cat metrics.txt
+    if ! curl -sfS localhost:8000/metrics | grep -E -v '^#' > metrics.txt; then
+        sleep 2 # Metrics may not be ready yet, just wait a bit and try again.
+        continue
+    fi
+
     if awk 'BEGIN { count=0; }
         /smb_operation_latency_seconds_count/ {
             if ($2 > 0) { count+=int($2); } 
