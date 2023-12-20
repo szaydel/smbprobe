@@ -126,20 +126,20 @@ def pop_from_queue_and_process_forever(
         # notify. Likewise if things are now healthy, but we did not report
         # remediation, we need to notify.
         if probe_state_notification_needed(key, probes_health, incident_event_id):
-            LOGGER.debug("Will post notifications at this point")
-            LOGGER.debug("Posting: {}".format(probes_health[key].data))
-            LOGGER.debug("Latest event_id: {}".format(probes_health[key].event_id))
+            # LOGGER.debug("Will post notifications at this point")
+            # LOGGER.debug("Posting: {}".format(probes_health[key].data))
+            # LOGGER.debug("Latest event_id: {}".format(probes_health[key].event_id))
 
             results = post_and_update_if_necessary(
                 key, probes_health, incident_event_id, notifications
             )
 
             if results is None:
-                LOGGER.debug(
-                    "Skipping previously posted incident with id: {}".format(
-                        incident_event_id[key]
-                    )
-                )
+                # LOGGER.debug(
+                #     "Skipping previously posted incident with id: {}".format(
+                #         incident_event_id[key]
+                #     )
+                # )
                 continue
 
             for res in results:
