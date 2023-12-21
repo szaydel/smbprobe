@@ -463,31 +463,51 @@ def run_probe_and_alert(
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "login").inc()
-        LOGGER.error("login latency in one or more samples is above threshold; latencies: '{}'" % latencies.login_lat)
+        LOGGER.error(
+            "login latency in one or more samples is above threshold; latencies: '{0}'".format(
+                latencies.login_lat
+            )
+        )
 
     if latencies.read_lat_above_threshold(read_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "read").inc()
-        LOGGER.error("median read latency: '{}' is above threshold" % latencies.read_lat_median)
+        LOGGER.error(
+            "median read latency: '{0}' is above threshold".format(
+                latencies.read_lat_median
+            )
+        )
 
     if latencies.write_lat_above_threshold(write_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "write").inc()
-        LOGGER.error("median write latency: '{}' is above threshold" % latencies.write_lat_median)
+        LOGGER.error(
+            "median write latency: '{0}' is above threshold".format(
+                latencies.write_lat_median
+            )
+        )
 
     if latencies.lsdir_lat_above_threshold(ls_dir_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "ls_dir").inc()
-        LOGGER.error("median list directory latency: '{}' is above threshold" % latencies.lsdir_lat_median)
+        LOGGER.error(
+            "median list directory latency: '{0}' is above threshold".format(
+                latencies.lsdir_lat_median
+            )
+        )
 
     if latencies.unlink_lat_above_threshold(unlink_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "unlink").inc()
-        LOGGER.error("median unlink latency: '{}' is above threshold" % latencies.unlink_lat_median)
+        LOGGER.error(
+            "median unlink latency: '{0}' is above threshold".format(
+                latencies.unlink_lat_median
+            )
+        )
 
     high_latency = not healthy
 
