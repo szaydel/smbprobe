@@ -94,13 +94,15 @@ Notifications are configured in the same file using a `[[notifications]]` sectio
 > [[probes]]
 > name = "" # This is optional and not yet used
 > address = "192.168.1.100" # IP address or hostname of the target system
-> domain = "target.example.com" # Domain with which our target is joined
+> domain = "TARGET" # Domain with which our target is joined
 > share = "share01" # Name of the share to attach to
 > username = "probeuser" # The service username with which to test
 > password = "@format {this.secrets.users.probeuser}"
 > remote_basedir = "." # Where on the share the test files will be created and removed from
 > interval = 60 # Interval in seconds between probing attempts
 > ```
+
+Note that `domain` is not necessarily the same as the DNS name in the configuration. The domain name here is the _NetBIOS_ name. The domain name is joined with the username to form a `DOMAINNAME\username` pair, which will then be used to authenticate to the target system.
 
 #### Multiple configurations for the same share
 
