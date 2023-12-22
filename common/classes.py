@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import List
 
-from constants import IOSIZE
+from common.constants import IOSIZE
+
 
 @dataclass(frozen=True)
 class ShareInfo:
@@ -14,6 +15,7 @@ class ShareInfo:
     domain: str
     user: str
     passwd: str
+    basedir: str = None
     interval: int = 30
 
 
@@ -25,6 +27,15 @@ class FailureCounts:
     unlink: int
     ls_dir: int
 
+    def as_dict(self):
+        return {
+            "login": self.login,
+            "read": self.read,
+            "write": self.write,
+            "unlink": self.unlink,
+            "ls_dir": self.ls_dir,
+        }
+
 
 @dataclass
 class Latencies:
@@ -34,13 +45,13 @@ class Latencies:
     unlink_lat: List[float]
     lsdir_lat: List[float]
 
-    def _median_lat(self, l):
+    def _median_lat(self, latency):
         # Even length of list case
-        if len(l) % 2 == 0:
-            two = l[len(l) // 2 - 1 : len(l) // 2 + 1]
+        if len(latency) % 2 == 0:
+            two = latency[len(latency) // 2 - 1 : len(latency) // 2 + 1]
             return sum(two) / 2
         # Odd length of list case
-        return l[len(l) // 2]
+        return latency[len(latency) // 2]
 
     @property
     def login_lat_median(self):
@@ -76,6 +87,15 @@ class Latencies:
 
     def lsdir_lat_above_threshold(self, threshold: float) -> bool:
         return self.lsdir_lat_median > threshold
+
+    def as_dict(self):
+        return {
+            "login_lat": self.login_lat,
+            "read_lat": self.read_lat,
+            "write_lat": self.write_lat,
+            "unlink_lat": self.unlink_lat,
+            "lsdir_lat": self.lsdir_lat,
+        }
 
 
 class RandomDataFileError(Exception):

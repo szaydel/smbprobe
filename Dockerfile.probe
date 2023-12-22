@@ -1,0 +1,17 @@
+FROM python:3.11-slim-bullseye
+WORKDIR /a
+RUN apt update
+RUN apt install -y smbclient
+
+COPY requirements-probe.txt requirements.txt
+RUN pip install -r requirements.txt
+
+RUN mkdir -p /probe/app
+COPY common/*.py /probe/app/common/
+COPY common/notifications/*.py /probe/app/common/notifications/
+COPY probe/*.py /probe/app
+RUN chmod +x /probe/app/main.py
+
+WORKDIR /probe/app
+
+ENTRYPOINT [ "/probe/app/main.py" ]

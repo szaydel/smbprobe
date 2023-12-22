@@ -22,9 +22,6 @@ on:
 env:
   # Use docker.io for Docker Hub if empty
   REGISTRY: ghcr.io
-  # github.repository as <account>/<repo>
-  IMAGE_NAME: ${{ github.repository }}
-
 
 jobs:
   build:
@@ -36,8 +33,15 @@ jobs:
       # This is used to complete the identity challenge
       # with sigstore/fulcio when running outside of PRs.
       id-token: write
+    strategy:
+      matrix:
+        include:
+          - image: ${{ github.repository }} # github.repository as <account>/<repo>
+            dockerfile: Dockerfile.probe
+          - image: '${{ github.repository }}-notifier'
+            dockerfile: Dockerfile.notifier
 
-    name: Build and optionally publish SMB Probe container
+    name: Build and optionally publish probe and notifier containers
     steps:
       # Install the cosign tool except on PR
       # https://github.com/sigstore/cosign-installer
@@ -61,8 +65,9 @@ jobs:
       # Login against a Docker registry except on PR
       # https://github.com/docker/login-action
       - name: Log into registry ${{ env.REGISTRY }}
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v2.2.0
+        # Login only when building on the master branch or when manually triggered.
+        if: github.ref_name == 'master' || github.event_name == 'workflow_dispatch'
+        uses: docker/login-action@v3.0.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -73,25 +78,33 @@ jobs:
       - name: Extract Docker metadata
         id: docker_meta
         uses: docker/metadata-action@v4.1.1
+        env:
+          IMAGE_STABILITY: ${{ github.ref == 'refs/heads/main' && 'stable' || 'devel' }}
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ matrix.image }}
           tags: |
+            type=ref,prefix=,suffix=,format=short,event=branch
+            type=ref,prefix=,suffix=,format=short,event=tag
+            type=ref,prefix=,suffix=,format=short,event=pr
+            type=raw,prefix=,suffix=,value=${{ env.IMAGE_STABILITY }}
+            type=raw,value=latest,enable={{is_default_branch}}
             type=schedule
             type=sha,prefix=,suffix=,format=short,event=branch
             type=sha,prefix=,suffix=,format=short,event=tag
             type=sha,prefix=,suffix=,format=short,event=pr
-            type=raw,value=latest,enable={{is_default_branch}}
 
       # Build and push Docker image with Buildx (don't push on PR)
       # https://github.com/docker/build-push-action
       - name: Build and push Docker images
         id: build-and-push
-        uses: docker/build-push-action@v4.1.1
+        uses: docker/build-push-action@v5.1.0
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           # linux/arm64/v8 is necessary to support Apple Silicon
           platforms: linux/amd64,linux/arm64/v8
-          push: ${{ github.event_name != 'pull_request' }}
+          # Push only when building on the master branch or when manually triggered.
+          push: ${{ github.ref_name == 'master' || github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
           cache-from: type=gha
@@ -100,7 +113,8 @@ jobs:
       # Sign the images with cosign using "keyless" signing method. For more 
       # info check out: https://docs.sigstore.dev/cosign/openid_signing
       - name: Sign the images with GitHub OIDC Token
-        if: ${{ github.event_name != 'pull_request' }}
+        # Sign only when building on the master branch or when manually triggered.
+        if: github.ref_name == 'master' || github.event_name == 'workflow_dispatch'
         env:
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
           TAGS: ${{ steps.docker_meta.outputs.tags }}

@@ -1,2 +1,8 @@
+monitoring/
+testing/data/
+__pycache__
+/config/.env
+/config/*.toml
 venv
-monitoring/*.conf
+.env
+docker-compose.yml

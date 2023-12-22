@@ -1,0 +1,15 @@
+FROM python:3.11-slim-bullseye
+WORKDIR /a
+
+COPY requirements-notifier.txt requirements.txt
+RUN pip install -r requirements.txt
+
+RUN mkdir -p /notifier/app
+COPY common/*.py /notifier/app/common/
+COPY common/notifications/*.py /notifier/app/common/notifications/
+COPY notifier/*.py /notifier/app
+RUN chmod +x /notifier/app/main.py
+
+WORKDIR /notifier/app
+
+ENTRYPOINT [ "/notifier/app/main.py" ]

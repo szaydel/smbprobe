@@ -1,0 +1,26 @@
+[[probes]]
+name = "" # This is optional and not yet used
+address = "192.168.100.1"
+domain = "corp.example.com"
+share = "smb01"
+username = "probeuser1"
+password = "@format {this.secrets.users.probeuser1}"
+remote_basedir = "."
+interval = 5
+
+[[probes]]
+name = "" # This is optional and not yet used
+address = "192.168.100.2"
+domain = "corp.example.com"
+share = "smb02"
+username = "probeuser2"
+password = "@format {this.secrets.users.probeuser2}"
+remote_basedir = "."
+interval = 5
+
+[[notifications]]
+url = "https://events.pagerduty.com/v2/enqueue"
+integration_key = "1234abcdef"
+severity = "error"
+target = "pager-duty"
+

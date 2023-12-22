@@ -4,7 +4,7 @@ address = "smb"
 domain = "TEST.DOMAIN"
 share = "probe1"
 username = "probeuser"
-password = "probepassword"
+password = "@format {this.secrets.users.probeuser}"
 remote_basedir = "."
 interval = 5
 
@@ -14,16 +14,9 @@ address = "smb"
 domain = "TEST.DOMAIN"
 share = "probe2"
 username = "probeuser"
-password = "probepassword"
+password = "@format {this.secrets.users.probeuser}"
 remote_basedir = "."
 interval = 5
 
-[[notifications]]
-headers = {"alpha-header" = "alpha", "beta-header" = "beta"}
-target = "request-bin"
-
-[[notifications]]
-url = "https://events.pagerduty.com/v2/enqueue"
-# integration_key = ""
-severity = ""
-target = "pager-duty"
+# [[notifications]]
+# There are no notifications defined in this file

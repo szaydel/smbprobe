@@ -1,19 +1,24 @@
+import os
+import sys
 import unittest
+
 from io import StringIO
 from unittest.mock import Mock, patch, call
 from dataclasses import dataclass
 
 import pexpect.replwrap
 
-from probe import (
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
+from common.configuration import display_parsed_config  # noqa: E402
+
+from .probe import (  # noqa: E402
     GET,
     PUT,
-    display_parsed_config,
     file_put_get_impl,
     get_file,
     put_file,
     list_directory,
-    parse_config_file,
     remove_file,
     timeit,
 )
@@ -175,29 +180,3 @@ class T(unittest.TestCase):
         self.assertLess(delta, 1)  # This should be nearly instant
         self.assertTrue(mock_repl.run_command.called)
         self.assertTrue(mock_repl.run_command.call_args == call(f"rm {remote_file}"))
-
-    def test_display_parsed_config(self):
-        expected: str
-        actual = display_parsed_config_redirect_stderr(
-            ["--alpha", "a", "--beta", "b", "--gamma", "g", "--password", "secret"]
-        )
-        baseline = "testdata/baseline1"
-        with open(baseline, "rt") as f:
-            expected = f.read()
-        self.assertEqual(expected, actual)
-
-    def test_parse_config_file(self):
-        expected = [
-            "--alpha",
-            "1",
-            "--beta",
-            "2",
-            "--gamma",
-            "3",
-            "--delta",
-            "4",
-            "--epsilon",
-        ]
-        ok, actual = parse_config_file("testdata/test1.conf")
-        self.assertTrue(ok)
-        self.assertEqual(expected, actual)

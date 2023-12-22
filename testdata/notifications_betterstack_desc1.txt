@@ -1,0 +1,5 @@
+_target address_ => `12.13.14.15`
+_target share_ => `alphashare`
+_target domain_ => `example.com`
+_latencies_ => `(login=1 read=2 write=3 ls_dir=5 unlink=4)`
+_failed ops_ => `(login=1 read=2 write=3 unlink=4 ls_dir=5)`

@@ -1,4 +1,0 @@
-logfmter==0.0.6
-pexpect==4.8.0
-prometheus-client==0.17.0
-PyYAML==6.0

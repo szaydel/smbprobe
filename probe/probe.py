@@ -1,35 +1,30 @@
-#!/usr/bin/env python3
-import logging
 import random
 import os
-import sys
 import tempfile
 import time
 
 from pathlib import Path
-from threading import Thread
-from typing import Any, Callable, Dict, List, Tuple
+import redis
+import redis.exceptions
+from typing import Callable, Tuple
 
 import pexpect
 import pexpect.replwrap
 
-from logfmter import Logfmter
-from prometheus_client import (
-    Gauge,
-    start_http_server,
-    Counter,
-    Histogram,
-    # write_to_textfile,
-)
+from common.classes import ShareInfo, FailureCounts, Latencies, RandomDataFile
 
-from cli_arg_parse import parser
-from classes import ShareInfo, FailureCounts, Latencies, RandomDataFile
-from constants import (
+from common.constants import (
     DEFAULT_LOOP_INTERVAL,
     DEFAULT_NUM_FILES,
+    DEFAULT_NOTIFICATIONS_LIST_NAME,
     IOSIZE,
 )
-from load_config import load_config, config_to_share_info_list
+
+from common.notifications.classes import Data
+
+from log import LOGGER
+
+from metrics import SMB_HIGH_OP_LATENCY, SMB_OP_FAILED, SMB_OP_LATENCY, SMB_STATUS
 
 EvalLineCallable = Callable[[pexpect.replwrap.REPLWrapper, str], Tuple[bool, str]]
 
@@ -37,35 +32,6 @@ FilePutGetCallable = Callable[
     [object, str, str, pexpect.replwrap.REPLWrapper, EvalLineCallable],
     Tuple[bool, str],
 ]
-
-
-SMB_STATUS = Gauge(
-    "smb_service_state",
-    "Current state of SMB service based on results of the probe",
-    labelnames=["address", "share", "domain"],
-)
-
-SMB_OP_LATENCY = Histogram(
-    "smb_operation_latency_seconds",
-    "Time it takes to complete a given SMB operation, such as read, write, lsdir, unlink",
-    labelnames=["address", "share", "domain", "operation"],
-)
-
-SMB_HIGH_OP_LATENCY = Counter(
-    "smb_latency_above_threshold_total",
-    "Count of times the probe detected high operation latency during a read, write, lsdir, unlink",
-    labelnames=["address", "share", "domain", "operation"],
-)
-
-SMB_OP_FAILED = Counter(
-    "smb_operation_failed_total",
-    "Number of times a particular probe operation did not succeed",
-    labelnames=["address", "share", "domain", "operation"],
-)
-
-DEFAULT_LOG_LEVEL = logging.DEBUG  # Change level to adjust output verbosity
-
-LOGGER = logging.getLogger("smb-probe")
 
 PUT = object()
 GET = object()
@@ -117,7 +83,7 @@ def login_and_get_repl(
         for token in err.value.split("\n"):
             if token.startswith(prefix):
                 err_msg = token[len(prefix) + 1 : -5]
-        return None, f"login failed with message: {err_msg}"
+        return None, f"login failed: {err_msg}"
 
 
 def close_connection(repl: pexpect.replwrap.REPLWrapper) -> Tuple[bool, str]:
@@ -205,7 +171,6 @@ def remove_file(
     repl: pexpect.replwrap.REPLWrapper = None,
     eval_line_func: EvalLineCallable = eval_line_in_repl,
 ) -> Tuple[bool, str | None]:
-
     """Removes file on the SMB share.
 
     Args:
@@ -359,7 +324,10 @@ def probe(
             (replw, msg), delta = login_and_get_repl(si)
             if not replw:
                 fails.login += 1
-                LOGGER.critical(msg)
+                LOGGER.critical(
+                    msg, extra=dict(address=si.addr, domain=si.domain, share=si.share)
+                )
+                succeeded = False
                 succeeded = False
                 return (
                     succeeded,
@@ -453,6 +421,7 @@ def run_probe_and_alert(
     write_thresh=1.0,
     ls_dir_thresh=1.0,
     unlink_thresh=1.0,
+    **kwargs,
 ):
     """Runs the probe and generates an alert if the probe fails or latencies are above threshold values.
 
@@ -464,8 +433,16 @@ def run_probe_and_alert(
         ls_dir_thresh (float, optional): Latency threshold for lsdir(s). Defaults to 1.0.
         unlink_thresh (float, optional): Latency threshold for unlink. Defaults to 1.0.
     """
+    conf = kwargs.get("conf")
+    if conf:
+        notifications = conf.get("notifications")
+        notifications_enabled = 0 if not notifications else len(notifications) > 0
+    else:
+        notifications_enabled = False
+
     ok, latencies, fails = probe(remote_file, si)
     healthy = ok
+    high_latency = False
 
     for sample in latencies.login_lat:
         SMB_OP_LATENCY.labels(si.addr, si.share, si.domain, "login").observe(sample)
@@ -482,41 +459,57 @@ def run_probe_and_alert(
     for sample in latencies.unlink_lat:
         SMB_OP_LATENCY.labels(si.addr, si.share, si.domain, "unlink").observe(sample)
 
-    if latencies.read_lat_above_threshold(read_thresh):
-        healthy = False
-        # Raise a notification
-        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "read").inc()
-        LOGGER.error("median read latency is above threshold")
-
     if latencies.login_lat_above_threshold(login_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "login").inc()
-        LOGGER.error("login latency is above threshold")
+        LOGGER.error(
+            "login latency in one or more samples is above threshold; latencies: '{0}'".format(
+                latencies.login_lat
+            )
+        )
+
+    if latencies.read_lat_above_threshold(read_thresh):
+        healthy = False
+        # Raise a notification
+        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "read").inc()
+        LOGGER.error(
+            "median read latency: '{0}' is above threshold".format(
+                latencies.read_lat_median
+            )
+        )
 
     if latencies.write_lat_above_threshold(write_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "write").inc()
-        LOGGER.error("median write latency is above threshold")
+        LOGGER.error(
+            "median write latency: '{0}' is above threshold".format(
+                latencies.write_lat_median
+            )
+        )
 
     if latencies.lsdir_lat_above_threshold(ls_dir_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "ls_dir").inc()
-        LOGGER.error("median list directory latency is above threshold")
+        LOGGER.error(
+            "median list directory latency: '{0}' is above threshold".format(
+                latencies.lsdir_lat_median
+            )
+        )
 
     if latencies.unlink_lat_above_threshold(unlink_thresh):
         healthy = False
         # Raise a notification
         SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "unlink").inc()
-        LOGGER.error("median unlink latency is above threshold")
+        LOGGER.error(
+            "median unlink latency: '{0}' is above threshold".format(
+                latencies.unlink_lat_median
+            )
+        )
 
-    if not healthy:
-        # Raise a notification
-        SMB_STATUS.labels(si.addr, si.share, si.domain).set(1)
-    else:
-        SMB_STATUS.labels(si.addr, si.share, si.domain).set(0)
+    high_latency = not healthy
 
     # Check if any commands had failures and if so, increment the failure
     # counters.
@@ -536,49 +529,37 @@ def run_probe_and_alert(
     if fails.unlink > 0:
         SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "unlink").inc(fails.unlink)
 
+    if not healthy:
+        LOGGER.error(
+            "share is unhealthy",
+            extra={"addr": si.addr, "domain": si.domain, "share": si.share},
+        )
+        # Raise a notification
+        SMB_STATUS.labels(si.addr, si.share, si.domain).set(1)
+    else:
+        SMB_STATUS.labels(si.addr, si.share, si.domain).set(0)
+
+    # If notifications are configured, we assume them to be enabled. We will
+    # post notification whether or not there is an issue with the probe.
+    if notifications_enabled:
+        data = Data(
+            target_address=si.addr,
+            target_share=si.share,
+            target_domain=si.domain,
+            latencies=latencies.as_dict(),
+            failed_ops=fails.as_dict(),
+            high_latency=high_latency,
+        )
+
+        r = redis.Redis(host="redis", port=6379, decode_responses=False)
+
+        # FIXME: This is likely to raise some exceptions, but we aren't
+        # handling any exceptions here at this point.
+        try:
+            _ = r.lpush(DEFAULT_NOTIFICATIONS_LIST_NAME, data.encode())
+        except redis.exceptions.ConnectionError as err:
+            LOGGER.critical(err)
     # write_to_textfile("raid.prom", #include registry parameter#)
-
-
-def parse_config_file(config: str) -> Tuple[bool, List[str]]:
-    """Parses configuration from file and produces a list of amounts to command line arguments.
-
-    Args:
-        config (str): Path to the configuration file.
-
-    Returns:
-        Tuple[bool, List[str]]: True if OK, False otherwise and argparse configuration parameters suitable for ingestion in parse_args.
-    """
-    conf_lines = []
-    try:
-        with open(config, "rb") as fp:
-            for line in fp.readlines():
-                if line.startswith(b"#"):  # Skip comment lines
-                    continue
-                tokens = line.decode("utf-8").strip().split()
-                conf_lines += tokens
-    except FileNotFoundError:
-        return False, []
-    return True, conf_lines
-
-
-def display_parsed_config(config: Dict[str, Any]):
-    """Prints out the configuration with which we are running.
-
-    Args:
-        config (Dict[str, Any]): Parsed probe configuration.
-    """
-    targets_cnt = 0
-    lines = ""
-    for target, share_details in config.items():
-        if targets_cnt > 0:
-            lines += "\n"  # Add an extra line between target specifications
-        targets_cnt += 1
-        lines += f"[{targets_cnt}]    ---- {target} ----\n"
-        for key, value in share_details.items():
-            if key == "password" and not value.startswith("$ENV_"):
-                value = "***SANITIZED***"
-            lines += f"{key:<20}\t=> {value}\n"
-    print(lines[:-1], file=sys.stderr, flush=True, end=None)
 
 
 def repeat_forever(*func_with_args, **kwargs):
@@ -586,100 +567,5 @@ def repeat_forever(*func_with_args, **kwargs):
     interval = kwargs.get("interval", DEFAULT_LOOP_INTERVAL)
     func, *args = func_with_args
     while True:
-        func(*args)
+        func(*args, **kwargs)
         time.sleep(interval)
-
-
-if __name__ == "__main__":
-    # Load arguments passed via the command line.
-    parsed_args = parser.parse_args()
-
-    config_file_path = os.environ.get(
-        "SMB_MONITOR_PROBE_CONFIGFILE", parsed_args.config_file
-    )
-    config, msg = load_config(config_file_path)
-    if not config:
-        err_msg = f"Unable to load configuration from '{config_file_path}': {msg}"
-        LOGGER.critical(err_msg)
-        sys.exit(1)
-
-    display_parsed_config(config)
-    si_list = config_to_share_info_list(config)
-    if not si_list:
-        LOGGER.critical("No shares specified in the configuration; exiting")
-        sys.exit(1)
-
-    # Thresholds from args
-    login_threshold = parsed_args.login_threshold
-    read_threshold = parsed_args.read_threshold
-    write_threshold = parsed_args.write_threshold
-    ls_dir_threshold = parsed_args.ls_dir_threshold
-    unlink_threshold = parsed_args.unlink_threshold
-
-    # Setup logging configuration
-    log_timestamp = parsed_args.log_timestamp
-    if log_timestamp:
-        formatter = Logfmter(
-            keys=["level", "ts"],
-            mapping={"level": "levelname", "ts": "asctime"},
-            datefmt="%Y-%m-%dT%H:%M:%S%z",
-        )
-    else:
-        formatter = Logfmter(
-            keys=["level"],
-            mapping={"level": "levelname"},
-        )
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    logging.basicConfig(
-        handlers=[handler],
-        format="%(asctime)s %(levelname)-8s %(message)s",
-        level=DEFAULT_LOG_LEVEL,
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-    )
-
-    for si in si_list:
-        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "login").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "read").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "write").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "ls_dir").inc(0)
-        SMB_HIGH_OP_LATENCY.labels(si.addr, si.share, si.domain, "unlink").inc(0)
-        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "login").inc(0)
-        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "read").inc(0)
-        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "write").inc(0)
-        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "ls_dir").inc(0)
-        SMB_OP_FAILED.labels(si.addr, si.share, si.domain, "unlink").inc(0)
-
-    # Start up the server to expose the metrics.
-    start_http_server(8000)
-
-    threads: List[Thread] = []
-    for idx, si in enumerate(si_list):
-        threads.append(
-            Thread(
-                target=repeat_forever,
-                args=(
-                    run_probe_and_alert,
-                    si,
-                    ".",
-                    login_threshold,
-                    read_threshold,
-                    write_threshold,
-                    ls_dir_threshold,
-                    unlink_threshold,
-                ),
-                kwargs=dict(interval=si.interval),
-            )
-        )
-
-    # Start all threads, do not wait on them here, instead join below.
-    for t in threads:
-        t.start()
-
-    # Wait for threads to terminate. Currently, there is no path leading to
-    # threads exiting thus allowing them to be join()ed. Therefore, this will
-    # just block forever. When we implement more sophistication and actually
-    # have a way for the thread to exit on its own, we will be ready for it
-    # here.
-    for t in threads:
-        t.join()
