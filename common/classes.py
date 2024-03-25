@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import List
 
-from common.constants import IOSIZE
+from common.constants import DEFAULT_LOOP_INTERVAL, IOSIZE
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,7 @@ class ShareInfo:
     user: str
     passwd: str
     basedir: str = None
-    interval: int = 30
+    interval: int = DEFAULT_LOOP_INTERVAL
 
 
 @dataclass
