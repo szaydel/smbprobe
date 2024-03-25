@@ -43,4 +43,4 @@ setup:
 	pip3 install -r requirements-dev.txt
 
 unittest:
-	python3 -m unittest -v notifier/test*.py probe/test*.py
+	python3 -m unittest -v common/test*.py notifier/test*.py probe/test*.py

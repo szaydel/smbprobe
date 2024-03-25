@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-
+set -x
 # These are the services which we expect to be running as part of this test
 # environment stack. We check later once the stack is running to make sure that
 # we see them.

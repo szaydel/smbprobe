@@ -69,14 +69,28 @@ def probe_config_to_si(settings: Dict[str, str]) -> ShareInfo:
     if not password:
         raise RuntimeError("password is required for basic functionality")
 
-    return ShareInfo(
-        addr=settings.get("address"),
-        share=settings.get("share"),
-        domain=settings.get("domain"),
-        user=settings.get("username"),
-        passwd=password,
-        basedir=settings.get("remote_basedir"),
-    )
+    if interval_str := settings.get("interval"):
+        interval = int(interval_str)
+        if interval < 1:
+            raise RuntimeError("interval must be at least 1 second")
+        return ShareInfo(
+            addr=settings.get("address"),
+            share=settings.get("share"),
+            domain=settings.get("domain"),
+            user=settings.get("username"),
+            passwd=password,
+            basedir=settings.get("remote_basedir"),
+            interval=interval,
+        )
+    else:
+        return ShareInfo(
+            addr=settings.get("address"),
+            share=settings.get("share"),
+            domain=settings.get("domain"),
+            user=settings.get("username"),
+            passwd=password,
+            basedir=settings.get("remote_basedir"),
+        )
 
 
 def config_to_share_info_list(settings: Dynaconf) -> List[ShareInfo]:
