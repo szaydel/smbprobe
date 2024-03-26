@@ -30,9 +30,10 @@ services:
 
   # If these images were built as part of local development/experimentation,
   # just change the name of the image to the local name/tag.
-  # To use the latest released image just replace :devel with :latest.
+  # To use the latest released image just replace the tagged version with 
+  # :latest.
   probe:
-    image: ghcr.io/szaydel/smbprobe:devel
+    image: ghcr.io/szaydel/smbprobe:v2.0.2
     depends_on:
       - redis
     env_file: config/.env
@@ -45,9 +46,10 @@ services:
       - ./config/probe.toml:/config/probe.toml
       - ./config/.secrets.toml:/config/.secrets.toml
 
-  # To use the latest released image just replace :devel with :latest.
+  # To use the latest released image just replace the tagged version with 
+  # :latest.
   notifier:
-    image: ghcr.io/szaydel/smbprobe-notifier:devel
+    image: ghcr.io/szaydel/smbprobe-notifier:v2.0.2
     command:
       - '--consecutive-fails-limit=2'
     depends_on:
